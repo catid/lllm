@@ -2,6 +2,8 @@
 
 Latent LLMs add downsamplers to the input and upsamplers to the output, allowing the majority of the model to operate in a smaller latent space.
 
+We choose a 4:1 downsampling/upsampling ratio, so the model produces 4 tokens at a time and must pad input up to be a multiple of 4 tokens.
+
 ## Setup
 
 Tested hardware configurations:
