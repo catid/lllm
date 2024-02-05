@@ -2,7 +2,7 @@ import math
 
 import torch.nn.functional as F
 
-from .lightning_attn2 import lightning_attn2
+import lightning_attn2
 
 
 def is_support(dim):

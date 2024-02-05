@@ -1,3 +1,6 @@
 torch
+mamba_ssm
 numpy
 deepspeed
+
+pytest

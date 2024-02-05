@@ -19,4 +19,7 @@ cd lllm
 conda create -n lllm python=3.10 -y && conda activate lllm
 
 pip install -r requirements.txt
+
+# Run unit tests to make sure everything is working
+pytest
 ```

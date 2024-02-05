@@ -2,33 +2,6 @@ import unittest
 from model.tokenizer import TRIE_TOKENIZER
 vocab_file = "rwkv_vocab_v20230424.txt"
 
-# Define multiple test cases
-test_cases = [
-    "ab a",
-    "a b",
-    "abab",
-    "b a",
-    #" ",  # Single space
-    #"a" * 100,  # Repeated character
-    #"",  # Empty string
-    #"hello world",
-    #"the quick brown fox jumps over the lazy dog",
-    #"1234567890",
-    #"!@#$%^&*()_+-=[]{}|;':,./<>?",
-    #"long text " * 10,
-    #"new\nlines\nincluded",
-    #"\t tabs \t and \n new lines",
-    #"MixedCASE and special $ymbols together",
-    #"Emoji 😊 support?",
-    #"Numbers 123 and letters ABC together",
-    #"Spaces    and    tabs\t\ttogether",
-    #"Very long string " + "a" * 100 + " with padding",
-    #"Ends with newline\n",
-    #"\nStarts with newline",
-    #"Contains unicode: üöäÜÖÄß",
-    #"Random text with newline\nin the middle",
-]
-
 class TestTRIETokenizer(unittest.TestCase):
     def setUp(self):
         # Initialize TRIE_TOKENIZER with the path to your sample tokens file
