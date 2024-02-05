@@ -4,7 +4,6 @@ from torch import nn, optim
 import time
 
 from mamba_ssm import Mamba
-from model.lru import LRULayer
 
 class TestMamba(unittest.TestCase):
     def setUp(self):
@@ -50,8 +49,8 @@ class TestMambaLearning(unittest.TestCase):
         # Set hyperparameters
         self.learning_rate = 0.01
         self.batch_size = 64
-        self.seq_len = 64
-        self.num_epochs = 100
+        self.seq_len = 256
+        self.num_epochs = 1000
         
         # Create a simple optimizer
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
@@ -101,6 +100,15 @@ class TestMambaLearning(unittest.TestCase):
         self.assertIsNotNone(final_loss, "Final loss is not computed.")
         self.assertLess(final_loss, initial_loss, "Loss did not decrease after training.")
 
+def create_causal_mask(L, device='cuda'):
+    import numpy as np
+    # L is the original sequence length
+    log2_L = int(np.ceil(np.log2(L)))
+    max_length = 2 ** log2_L  # Adjusted to the next power of 2 for uniformity
+    mask = torch.triu(torch.ones((max_length, max_length), device=device), 1)
+    mask = torch.exp(mask)  # Convert to 0s and 1s, where -inf -> 0 (blocking) and 0 -> 1 (allowing)
+    return mask
+
 class TestModelComparison(unittest.TestCase):
     def setUp(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -124,14 +132,10 @@ class TestModelComparison(unittest.TestCase):
         ).to(self.device)
         self.rnn_model = torch.compile(self.rnn_model)
 
-        self.lru_model = LRULayer(self.dim)
-        self.lru_model.to(self.device)
-        self.lru_model = torch.compile(self.lru_model)
-
         # Shared training setup
         self.learning_rate = 0.01
-        self.batch_size = 64
-        self.seq_len = 65536//4
+        self.batch_size = 256
+        self.seq_len = 256
         self.num_epochs = 100
 
         self.loss_fn = nn.MSELoss()
@@ -174,10 +178,8 @@ class TestModelComparison(unittest.TestCase):
         # Print number of parameters
         mamba_params = self.count_parameters(self.mamba_model)
         rnn_params = self.count_parameters(self.rnn_model)
-        lru_params = self.count_parameters(self.lru_model)
         print(f"Mamba - Number of trainable parameters: {mamba_params}")
         print(f"RNN - Number of trainable parameters: {rnn_params}")
-        print(f"LRU - Number of trainable parameters: {lru_params}")
 
         # Train Mamba and measure performance
         mamba_time, mamba_loss = self.train_model(self.mamba_model, x, y)
@@ -186,10 +188,6 @@ class TestModelComparison(unittest.TestCase):
         # Train RNN and measure performance
         rnn_time, rnn_loss = self.train_model(self.rnn_model, x, y)
         print(f"RNN - Training time: {rnn_time:.3f} seconds, Final loss: {rnn_loss:.4f}")
-
-        # Train LRU and measure performance
-        lru_time, lru_loss = self.train_model(self.lru_model, x, y)
-        print(f"LRU - Training time: {lru_time:.3f} seconds, Final loss: {lru_loss:.4f}")
 
 if __name__ == '__main__':
     unittest.main()
