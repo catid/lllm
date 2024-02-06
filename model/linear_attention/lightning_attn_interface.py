@@ -2,7 +2,7 @@ import math
 
 import torch.nn.functional as F
 
-import lightning_attn2
+from model.linear_attention.triton_lightning_attn2 import lightning_attn2
 
 
 def is_support(dim):
