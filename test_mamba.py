@@ -121,7 +121,7 @@ class TestModelComparison(unittest.TestCase):
             d_conv=4,
             expand=2,
         ).to(self.device)
-        
+
         # RNN setup
         self.rnn_model = nn.RNN(
             input_size=self.dim,

@@ -1,7 +1,4 @@
 import torch.nn as nn
-import torch.nn.functional as F
-
-import math
 
 from util import SGLU
 from linear_attention.srmsnorm import FastSimpleRMSNorm
@@ -37,16 +34,14 @@ class CausalSelfAttention(nn.Module):
         y = self.resid_dropout(self.c_proj(y))
         return y
 
-
-
-class Block(nn.Module):
-    def __init__(self, dim=64, heads=8, dropout=0.1):
+class Transnormer(nn.Module):
+    def __init__(self, args):
         super().__init__()
 
-        self.ln1 = FastSimpleRMSNorm(dim)
-        self.attn = CausalSelfAttention(dim, heads, dropout)
-        self.ln2 = FastSimpleRMSNorm(dim)
-        self.sglu = SGLU(d_in=dim, mult=4, d_out=dim, bias=False)
+        self.ln1 = FastSimpleRMSNorm(args.dim)
+        self.attn = CausalSelfAttention(args.dim, args.heads, args.dropout)
+        self.ln2 = FastSimpleRMSNorm(args.dim)
+        self.sglu = SGLU(d_in=args.dim, mult=args.ff_mult, d_out=args.dim, bias=args.ff_bias)
 
     def forward(self, x):
         x = x + self.attn(self.ln1(x))
