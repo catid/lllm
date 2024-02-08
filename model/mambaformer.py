@@ -108,7 +108,7 @@ class MambaFormer(nn.Module):
 
         # This does pre-norm inside mamba_block().
         # But they do not add the residual inside since we specify fused_add_norm=False
-        hidden_states, _ = self.mamba_block(hidden_states=x, residual=None, inference_params=None)
+        hidden_states, _ = self.mamba_block(x, residual=None, inference_params=None)
         x += hidden_states
 
         return x

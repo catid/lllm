@@ -60,7 +60,7 @@ class RankReductionLayer(nn.Module):
 
         self.down = nn.Linear(d_in, rank)
         self.up = nn.Linear(rank, d_out)
-    
+
     def forward(self, x):
         return self.up(self.down(x))
 

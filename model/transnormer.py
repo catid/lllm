@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-from util import SGLU
+from util import SGLU, LinRelPosEncoding
 from linear_attention.srmsnorm import FastSimpleRMSNorm
 from linear_attention.lightning_attn_interface import lightning_attn_func
 
@@ -8,14 +8,17 @@ class CausalSelfAttention(nn.Module):
     def __init__(self, dim=64, heads=8, dropout=0.1):
         super().__init__()
 
+        self.heads = heads
+        self.dim = dim
         assert dim % heads == 0
+
+        self.lrpe = LinRelPosEncoding(num_heads=heads, embed_dim=dim//heads)
+        self.offset = 0
 
         self.c_attn = nn.Linear(dim, 3 * dim, bias=False)
         self.c_proj = nn.Linear(dim, dim, bias=False)
         self.attn_dropout = nn.Dropout(dropout)
         self.resid_dropout = nn.Dropout(dropout)
-        self.heads = heads
-        self.dim = dim
 
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -25,6 +28,9 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.heads, C // self.heads).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T, self.heads, C // self.heads).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.heads, C // self.heads).transpose(1, 2) # (B, nh, T, hs)
+
+        q = self.lrpe(q, offset=self.offset)
+        k = self.lrpe(k, offset=self.offset)
 
         y = lightning_attn_func(q, k, v)
 
