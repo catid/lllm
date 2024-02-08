@@ -112,7 +112,7 @@ def create_causal_mask(L, device='cuda'):
 class TestModelComparison(unittest.TestCase):
     def setUp(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
+
         # Mamba setup
         self.dim = 16
         self.mamba_model = Mamba(

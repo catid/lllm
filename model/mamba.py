@@ -1,50 +1,22 @@
-# Theory (1) Mamba and Transformer architectures are complementary:
-
-# RNNs are designed for sequences and Transformers for ngram prediction.
-# The best versions of these are excellent at both.
-
 # "Mamba" (Gu and Dao, 2023)
 # https://arxiv.org/pdf/2312.00752.pdf
 # Figure 9 shows that adding attention layers improves performance.
 
 # "Is Mamba Capable of ICL?" (Grazzi et al, 2024)
 # https://arxiv.org/pdf/2402.03170.pdf
-# In Figure 2 you can see that sometimes Transformer learns faster,
-# and other times Mamba learns faster.
-# They find that Mamba has a similar "iterative refinement" behavior.
+# "Overall, our findings establish Mamba as an efficient and performant
+# alternative to transformers for ICL involving longer input sequences."
 
-
-# Theory (2) Transformer blocks appear to be forming functional pairs:
-
-# "Subformer" (Reid et al, 2021)
-# https://aclanthology.org/2021.findings-emnlp.344.pdf
-# Shows that "every 2 layers shared" performs much better than all-shared,
-# But not much better than less sharing.  So there's something important about pairs.
-
-# "The Truth is in There" (LASER) (Sharma et al, 2023)
-# https://arxiv.org/pdf/2312.13558.pdf
-# Shows that every other layer seems to be low rank in a large language model,
-# indicating that pairs of layers are plausible components.
-
-# "PonderNet" (Banino et al, 2021)
-# https://arxiv.org/pdf/2107.05407.pdf
-# Shows that layers can be repeated and performance improves.
-# There are previous results that indicate DNNs implement something like
-# iterative optimizers, and these benefit from more iterations of course.
-# But the "unit" of iteration seems to be pairs of blocks.
-
-
-# Combining (1) and (2): Pairs of alternating Mamba/Transformer blocks
-# is a powerful combination that seems to already benchmark well.
-# Running the Transformer first makes sense to me since it grabs information
-# from all over the input space and then Mamba can work on it a bit more locally.
+# "Can Mamba Learn How to Learn? A Comparative Study on In-Context Learning Tasks" (Park et al, 2024)
+# https://arxiv.org/pdf/2402.04248.pdf
+# They find that adding attention layers fixes decision tree,
+# orthogonal-outlier regression, and vector-valued MQAR tests.
 
 import torch
-from torch import nn, optim
+from torch import nn
 
 from mamba_ssm import Mamba, Block
-from transnormer import Transnormer
-from model.linear_attention.srmsnorm import FastSimpleRMSNorm
+from model.srmsnorm import FastSimpleRMSNorm
 
 import math
 
@@ -80,32 +52,28 @@ def _init_weights(
                 with torch.no_grad():
                     p /= math.sqrt(n_residuals_per_layer * n_layer)
 
-class MambaFormer(nn.Module):
-    def __init__(self, layer_index, args):
+
+class MambaBlock(nn.Module):
+    def __init__(self, layer_index, dim, state, conv, expand):
         super().__init__()
 
-        self.transnormer = Transnormer(args)
-
         mamba_mixer = Mamba(
-                    d_model=args.dim,
-                    d_state=args.mamba_state,
-                    d_conv=args.mamba_conv,
-                    expand=args.mamba_expand)
-        mamba_norm = FastSimpleRMSNorm(args.dim)
+                    d_model=dim,
+                    d_state=state,
+                    d_conv=conv,
+                    expand=expand)
+        mamba_norm = FastSimpleRMSNorm(dim)
 
         self.mamba_block = Block(
-            args.dim,
+            dim,
             mamba_mixer,
             norm_cls=mamba_norm,
             fused_add_norm=False,
             residual_in_fp32=False)
 
-        _init_weights(self.transnormer, layer_index * 2)
-        _init_weights(self.mamba_block, layer_index * 2 + 1)
+        _init_weights(self.mamba_block, layer_index)
 
     def forward(self, x):
-        x = self.transnormer(x)
-
         # This does pre-norm inside mamba_block().
         # But they do not add the residual inside since we specify fused_add_norm=False
         hidden_states, _ = self.mamba_block(x, residual=None, inference_params=None)

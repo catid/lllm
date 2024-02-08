@@ -4,7 +4,7 @@ import unittest
 import time
 
 from model.util import SimpleRMSNorm
-from model.linear_attention.srmsnorm import FastSimpleRMSNorm
+from model.srmsnorm import FastSimpleRMSNorm
 
 class TestRMSNorm(unittest.TestCase):
     def setUp(self):

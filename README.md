@@ -1,3 +1,5 @@
+# WORK IN PROGRESS (do not use)
+
 # Latent Large Language Models
 
 Latent LLMs add downsamplers to the input and upsamplers to the output, allowing the majority of the model to operate in a smaller latent space.

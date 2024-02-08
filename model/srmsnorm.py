@@ -1,7 +1,9 @@
+# SimpleRMSNorm from "TransNormerLLM" (Qin et al, 2024)
+# https://arxiv.org/pdf/2307.14995.pdf
+
 # Copyright (c) 2024 Doraemonzzz
 # CREDITS: This comes almost as-is from the Triton layer norm tutorial
 # https://github.com/openai/triton/blob/master/python/tutorials/05-layer-norm.py
-
 
 import torch
 import triton

@@ -1,3 +1,10 @@
+# Ngram layer from "In-Context Language Learning: Architectures and Algorithms" (Akyurek, 2024)
+# https://arxiv.org/pdf/2401.12973.pdf
+# This reminds me of the LZ step of a general lossless data compressor.
+
+# From seq_icl project:
+# https://github.com/berlino/seq_icl/blob/77553249cc354480bd2375e8d3fca9784adc2c17/src/models/sequence/rnn/ngram.py#L45
+
 import torch
 from torch import nn
 
@@ -31,7 +38,7 @@ def induction_head(x, hidden_state, shift_step=1, ngram=1):
     return output
 
 class Ngram(nn.Module):
-    def __init__(self, d_model, ngram=1, layer_idx=None, device=None, dtype=None):
+    def __init__(self, d_model, ngram=1):
         super().__init__()
         self.d_model = d_model
         self.ngram = ngram
