@@ -12,7 +12,7 @@ class TokenMerger(nn.Module):
         self.down = nn.Linear(dim * 2, dim)
 
     def forward(self, x):
-        batch_size, num_tokens, num_features = tensor.shape
+        batch_size, num_tokens, num_features = x.shape
         assert num_tokens % 2 == 0, "num_tokens must be even"
 
         x = x.view(batch_size, num_tokens // 2, num_features * 2)
