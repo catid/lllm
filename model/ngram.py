@@ -7,6 +7,7 @@
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 def induction_head(x, hidden_state, shift_step=1, ngram=1):
     _, seq_len = x.shape
