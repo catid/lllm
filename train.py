@@ -64,7 +64,8 @@ def synchronize_seed(args, rank, shard_id):
 ################################################################################
 # Model Training
 
-from net import DINOv2Backbone, NeckFormer, ImageDecoder
+from model.model import LatentLanguage, LatentLanguageConfig
+from dataloader import DatasetLoader
 
 def make_optimizer(model, args):
     model_parameters = list(model.parameters())
@@ -76,56 +77,38 @@ def print_model_size(model, model_name):
     num_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     log_0(f"{model_name} has {num_parameters:,} trainable parameters")
 
-def ref_forward_and_loss(embeddings, target_image, model_neck, model_decoder, criterion):
+def ref_forward_and_loss(token_batch, mask_batch, model, criterion):
     # DeepSpeed: forward + backward + optimize
-    outputs = model_neck(embeddings)
-    pred_image = model_decoder(outputs)
+    outputs = model(token_batch, mask_batch)
     return criterion(pred_image, target_image), pred_image
 
 def train_model(args):
-    t0 = time.time()
-
     deepspeed.init_distributed(
         dist_backend="nccl",
         verbose="false"
     )
 
-    model_backbone = DINOv2Backbone()
-    model_backbone.eval()
+    cfg = LatentLanguageConfig()
 
-    model_neck = NeckFormer(d_in=1024, height=16, width=16, d_out=256, d_hidden=256, segments=16, depth=2, expansion_factor=4, dropout=0.1)
-    neck_optimizer = make_optimizer(model_neck, args)
-    neck_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(neck_optimizer, T_max=args.max_epochs)
+    model = LatentLanguage(cfg)
 
-    model_decoder = ImageDecoder(d_in=256, d_chan=16, d_conv=4)
-    decoder_optimizer = make_optimizer(model_decoder, args)
-    decoder_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(decoder_optimizer, T_max=args.max_epochs)
-
-    print_model_size(model_neck, "model_neck")
-    print_model_size(model_decoder, "model_decoder")
+    model_optimizer = make_optimizer(model, args)
+    model_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(model_optimizer, T_max=args.max_epochs)
 
     # DeepSpeed engine
-    neck_engine, neck_engine_optimizer, _, _ = deepspeed.initialize(
+    lm_engine, lm_engine_optimizer, _, _ = deepspeed.initialize(
         args=args,
-        model=model_neck,
-        optimizer=neck_optimizer,
-        lr_scheduler=neck_lr_scheduler,
+        model=model,
+        optimizer=model_optimizer,
+        lr_scheduler=model_lr_scheduler,
         #config_params=args.deepspeed_config,  <- This should be in the args
-        model_parameters=model_neck.parameters())
-
-    decoder_engine, decoder_engine_optimizer, _, _ = deepspeed.initialize(
-        args=args,
-        model=model_decoder,
-        optimizer=decoder_optimizer,
-        lr_scheduler=decoder_lr_scheduler,
-        #config_params=args.deepspeed_config,  <- This should be in the args
-        model_parameters=model_decoder.parameters())
+        model_parameters=model.parameters())
 
     log_0(f"Arguments: {args}")
 
     comm.barrier()
 
-    fp16 = decoder_engine.fp16_enabled()
+    fp16 = lm_engine.fp16_enabled()
     log_0(f'decoder_engine.fp16_enabled={fp16}')
 
     if fp16:
@@ -133,14 +116,12 @@ def train_model(args):
     else:
         image_dtype = torch.float32
 
-    rank = neck_engine.local_rank
-    assert decoder_engine.local_rank == rank, "Unexpected mismatch"
-    shard_id = neck_engine.global_rank
-    assert decoder_engine.global_rank == shard_id, "Unexpected mismatch"
-    num_gpus = neck_engine.world_size
-    train_batch_size = neck_engine.train_batch_size()
-    data_loader_batch_size = neck_engine.train_micro_batch_size_per_gpu()
-    steps_per_print = neck_engine.steps_per_print()
+    rank = lm_engine.local_rank
+    shard_id = lm_engine.global_rank
+    num_gpus = lm_engine.world_size
+    train_batch_size = lm_engine.train_batch_size()
+    data_loader_batch_size = lm_engine.train_micro_batch_size_per_gpu()
+    steps_per_print = lm_engine.steps_per_print()
 
     num_loader_threads = os.cpu_count()//2
     crop_w = 224
@@ -159,57 +140,34 @@ def train_model(args):
 
     forward_and_loss = torch.compile(ref_forward_and_loss, dynamic=True, fullgraph=True)
 
-    full_dataset = []
-    full_embeddings = []
+    dataset_loader = DatasetLoader("wikitext", "wikitext-103-raw-v1")
+    train_dataloader = dataset_loader.get_dataloader("train")
+    test_dataloader = dataset_loader.get_dataloader("test")
 
-    def make_random_image():
-        # Create an array of shape (64, 64, 3) with random values
-        array = np.random.rand(64, 64, 3) * 255
-        array = array.astype(np.uint8)
-        return array
+    # Your training loop here
+    num_epochs = 10
+    device = "cuda"
 
-    # Make some mock data
-    for _ in range(2000):
-        full_dataset.append(make_random_image())
-        full_embeddings.append(make_random_image())
+    for epoch in range(num_epochs):
+        print(f"Epoch {epoch+1}")
 
-    image_iterator = ExternalInputIterator(full_dataset, data_loader_batch_size, shard_id, num_gpus)
-    embed_iterator = ExternalInputIterator(full_embeddings, data_loader_batch_size, shard_id, num_gpus)
+        for batch in train_dataloader:
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
 
-    image_iterator.reset(seed=0)
-    embed_iterator.reset(seed=0)
+            loss = forward_and_loss(input_ids, attention_mask)
 
-    train_loader = CustomInMemoryDALILoader(
-        image_iterator,
-        embed_iterator,
-        batch_size=data_loader_batch_size,
-        num_threads=num_loader_threads,
-        device_id=rank,
-        crop_w=crop_w,
-        crop_h=crop_h,
-        fp16=fp16)
-
-    # Now you can use train_loader and val_loader in your training and validation loops
-    # Example:
-    for epoch in range(4):
-        print(f"RESET epoch={epoch}")
-        image_iterator.reset(seed=epoch)
-        embed_iterator.reset(seed=epoch)
-
-        # Training loop
-        for batch in train_loader:
-            batch = batch[0]
-            normalized, scaled, embeddings = batch["normalized"], batch["scaled"], batch["embeddings"]
-            print(f"Batch epoch={epoch}")
-            print(f"normalized = {normalized}")
-            print(f"scaled = {scaled}")
-            print(f"embeddings = {embeddings}")
-
-    return
+        with torch.no_grad():
+            for batch in test_dataloader:
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+                # Your evaluation code here
 
 
 ################################################################################
 # Entrypoint
+
+import argparse
 
 def main(args):
     train_model(args)

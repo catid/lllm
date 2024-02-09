@@ -28,3 +28,9 @@ pip install -U --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/
 # Run unit tests to make sure everything is working
 pytest
 ```
+
+## Train
+
+```bash
+./launch_local_train.sh
+```

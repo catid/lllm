@@ -2,5 +2,6 @@ torch
 mamba_ssm
 numpy
 deepspeed
+datasets
 
 pytest
