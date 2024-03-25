@@ -32,6 +32,8 @@ def tokenize_function(examples):
 
 split_dataset = split_dataset_by_node(dataset, rank=rank, world_size=world_size)
 
+comm.barrier()
+
 tokenized_dataset = split_dataset.map(tokenize_function, batched=True, num_proc=16, remove_columns=["text"])
 
 # Define the training arguments with DeepSpeed configuration
