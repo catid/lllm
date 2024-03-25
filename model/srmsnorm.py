@@ -6,9 +6,11 @@
 # https://github.com/openai/triton/blob/master/python/tutorials/05-layer-norm.py
 
 import torch
+import torch.nn.functional as F
+from torch import nn
+
 import triton
 import triton.language as tl
-
 
 # fmt: off
 @triton.jit
@@ -185,3 +187,15 @@ class FastSimpleRMSNorm(torch.nn.Module):
 
     def forward(self, x):
         return _SrmsNorm.apply(x, self.eps)
+
+# Simple RMS Normalization
+# From "TransNormerLLM" (Qin et al, 2024) https://arxiv.org/pdf/2307.14995.pdf
+# Based on "Root Mean Square Layer Normalization" (Zhang and Sennrich, 2019)
+# Faster version: from linear_attention.srmsnorm import FastSimpleRMSNorm
+class SimpleRMSNorm(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.scale = dim ** 0.5
+
+    def forward(self, x):
+        return F.normalize(x, dim = -1) * self.scale

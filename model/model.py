@@ -1,47 +1,25 @@
 import torch
 from torch import nn
 
-import random
-
-from model.mamba import MambaBlock
-from model.ngram import Ngram
+from model.attention import CausalMHA
+from model.srmsnorm import FastSimpleRMSNorm
+from model.util import SGLU
 
 from dataclasses import dataclass
 
 @dataclass
 class LatentLanguageConfig:
-    dim: int = 256
-    state: 16
-    conv: 2
-    expand: 4
-    vocab_size: -1
+    vocab_size: int = 65529
+    dim: int = 512
+    layers: int = 12
 
-class TokenMerger(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.down = nn.Linear(dim * 2, dim)
+    heads: int = 8
+    dim_head: int = 64
 
-    def forward(self, x):
-        batch_size, num_tokens, num_features = x.shape
-        assert num_tokens % 2 == 0, "num_tokens must be even"
+    ffn_mult: int = 4
+    ffn_bias: bool = False
 
-        x = x.view(batch_size, num_tokens // 2, num_features * 2)
-        x = self.down(x)
-
-        return x
-
-class TokenExpander(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.up = nn.Linear(dim, dim * 2)
-
-    def forward(self, x):
-        batch_size, num_tokens, num_features = x.shape
-
-        x = self.up(x)
-        x = x.view(batch_size, num_tokens * 2, num_features // 2)  
-
-        return x
+    dropout: float = 0.1
 
 class LatentLanguage(nn.Module):
     def __init__(self, cfg):
@@ -49,57 +27,49 @@ class LatentLanguage(nn.Module):
 
         self.embedding = nn.Embedding(cfg.vocab_size, cfg.dim)
 
-        # 1:1 with input tokens
-        self.encoder = nn.Sequential(
-            self.embedding,
-            MambaBlock(0, cfg.dim, cfg.state, cfg.conv, cfg.expand),
-            Ngram(cfg.dim, ngram=1),
-            Ngram(cfg.dim, ngram=2),
-            Ngram(cfg.dim, ngram=3),
-            MambaBlock(1, cfg.dim, cfg.state, cfg.conv, cfg.expand),
-            TokenMerger(cfg.dim),
-            MambaBlock(2, cfg.dim, cfg.state, cfg.conv, cfg.expand),
-            TokenMerger(cfg.dim),
-            MambaBlock(3, cfg.dim, cfg.state, cfg.conv, cfg.expand),
-            nn.Linear(cfg.dim, cfg.dim // 2),
-            MambaBlock(4, cfg.dim // 2, cfg.state, cfg.conv, cfg.expand),
-        )
+        self.layers = nn.ModuleList()
 
-        layer_index = 5
-        self.body_layers = []
+        # Use FastSimpleRMSNorm for all layers
+        self.norm = FastSimpleRMSNorm(cfg.dim)
 
-        for _ in range(cfg.layers):
-            # Add pairs of layers to self.body_layers
-            self.body_layers.append(
-                nn.Sequential(
-                    MambaBlock(layer_index, cfg.dim // 2, cfg.state, cfg.conv, cfg.expand),
-                    MambaBlock(layer_index + 1, cfg.dim // 2, cfg.state, cfg.conv, cfg.expand),
-                )
-            )
-            layer_index += 2
+        # Use Simple GLU for all layers
+        self.outer_attn = CausalMHA(d_in=cfg.dim, d_out=cfg.dim, heads=cfg.heads, dim_head=cfg.dim_head, dropout=cfg.dropout)
+        self.outer_ffn = SGLU(d_in=cfg.dim, mult=cfg.ffn_mult, d_out=cfg.dim, bias=cfg.ffn_bias)
+
+        for _ in range(cfg.layers - 1):
+            self.layers.append(nn.ModuleList([
+                CausalMHA(d_in=cfg.dim, d_out=cfg.dim, heads=cfg.heads, dim_head=cfg.dim_head, dropout=cfg.dropout),
+                SGLU(d_in=cfg.dim, mult=cfg.ffn_mult, d_out=cfg.dim, bias=cfg.ffn_bias),
+            ]))
 
         self.lm_head = nn.Linear(cfg.dim, cfg.vocab_size)
-
-        self.decoder = nn.Sequential(
-            MambaBlock(layer_index, cfg.dim // 2, cfg.state, cfg.conv, cfg.expand),
-            nn.Linear(cfg.dim // 2, cfg.dim),
-            MambaBlock(layer_index + 1, cfg.dim, cfg.state, cfg.conv, cfg.expand),
-            TokenExpander(cfg.dim),
-            MambaBlock(layer_index + 2, cfg.dim, cfg.state, cfg.conv, cfg.expand),
-            TokenExpander(cfg.dim),
-            MambaBlock(layer_index + 3, cfg.dim, cfg.state, cfg.conv, cfg.expand),
-            self.lm_head,
-        )
 
         # Tie vocab weights
         self.lm_head.weight = self.embedding.weight
 
     def forward(self, x):
-        x = self.encoder(x)
+        x = self.embedding(x)
 
-        random.shuffle(self.body_layers)
+        # TODO: Try Mamba at first layer
+        # TODO: Try Windowed attention
 
-        for layer in self.body_layers:
-            x = layer(x)
+        # One extra attention layer at the start
+        x = self.norm(x)
+        x = x + self.outer_attn(x)
 
-        return self.decoder(x)
+        for attn, ffn in self.layers:
+            # Repeat weights for consecutive layers
+            for _ in range(2):
+                x = self.norm(x)
+                x = x + attn(x)
+
+                x = self.norm(x)
+                x = x + ffn(x)
+
+        # One extra FFN layer at the end
+        x = self.norm(x)
+        x = x + self.outer_ffn(x)
+
+        # TODO: Try Mamba near last layer
+
+        return self.lm_head(x)

@@ -1,7 +1,9 @@
 torch
-mamba_ssm
+xformers
 numpy
 deepspeed
 datasets
 
 pytest
+
+#mamba_ssm

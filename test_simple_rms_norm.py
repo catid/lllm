@@ -1,10 +1,8 @@
 import torch
-from torch import nn
 import unittest
 import time
 
-from model.util import SimpleRMSNorm
-from model.srmsnorm import FastSimpleRMSNorm
+from model.srmsnorm import FastSimpleRMSNorm, SimpleRMSNorm
 
 class TestRMSNorm(unittest.TestCase):
     def setUp(self):
