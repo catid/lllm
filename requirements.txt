@@ -3,6 +3,7 @@ xformers
 numpy
 deepspeed
 
+huggingface_hub[cli]
 datasets
 transformers
 
