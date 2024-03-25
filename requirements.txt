@@ -5,7 +5,7 @@ deepspeed
 
 huggingface_hub[cli]
 datasets
-transformers
+transformers[torch]
 
 pytest
 
