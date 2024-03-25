@@ -6,7 +6,9 @@ os.environ["NCCL_IB_DISABLE"] = "1"
 from datasets import load_dataset
 from datasets.distributed import split_dataset_by_node
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
+
 import deepspeed
+from deepspeed import comm
 
 # Initialize DeepSpeed
 deepspeed.init_distributed()
@@ -21,6 +23,8 @@ print(dataset)
 model_name = "gpt2"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
+
+comm.barrier()
 
 # Tokenize the dataset
 def tokenize_function(examples):
