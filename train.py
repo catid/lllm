@@ -1,10 +1,17 @@
+# Set the environment variables
+import os
+os.environ["NCCL_P2P_DISABLE"] = "1"
+os.environ["NCCL_IB_DISABLE"] = "1"
+
 from datasets import load_dataset
 from datasets.distributed import split_dataset_by_node
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
-from accelerate import Accelerator
+import deepspeed
 
 # Initialize DeepSpeed
-accelerator = Accelerator()
+deepspeed.init_distributed()
+rank = deepspeed.comm.get_rank()
+world_size = deepspeed.comm.get_world_size()
 
 # Load the dataset
 dataset = load_dataset("allenai/dolma", split="train", name="v1_6-sample")
@@ -19,7 +26,7 @@ model = AutoModelForCausalLM.from_pretrained(model_name)
 def tokenize_function(examples):
     return tokenizer(examples["text"])
 
-split_dataset = split_dataset_by_node(dataset, rank=accelerator.process_index, world_size=accelerator.num_processes)
+split_dataset = split_dataset_by_node(dataset, rank=rank, world_size=world_size)
 
 tokenized_dataset = split_dataset.map(tokenize_function, batched=True, num_proc=16, remove_columns=["text"])
 
