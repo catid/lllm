@@ -1,4 +1,5 @@
 from datasets import load_dataset
+from datasets.distributed import split_dataset_by_node
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
 import deepspeed
 
@@ -15,7 +16,9 @@ model = AutoModelForCausalLM.from_pretrained(model_name)
 def tokenize_function(examples):
     return tokenizer(examples["text"])
 
-tokenized_dataset = dataset.map(tokenize_function, batched=True, num_proc=22, remove_columns=["text"])
+split_dataset = split_dataset_by_node(dataset, num_nodes=6)
+
+tokenized_dataset = split_dataset.map(tokenize_function, batched=True, num_proc=22, remove_columns=["text"])
 
 # Define the training arguments with DeepSpeed configuration
 training_args = TrainingArguments(
