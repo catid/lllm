@@ -2,7 +2,9 @@ torch
 xformers
 numpy
 deepspeed
+
 datasets
+transformers
 
 pytest
 

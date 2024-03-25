@@ -22,9 +22,6 @@ conda create -n lllm python=3.10 -y && conda activate lllm
 
 pip install -r requirements.txt
 
-# Install the nightly version of triton that includes parallel scan
-pip install -U --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/ triton-nightly
-
 # Run unit tests to make sure everything is working
 pytest
 ```
