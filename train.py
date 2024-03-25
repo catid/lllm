@@ -16,7 +16,7 @@ model = AutoModelForCausalLM.from_pretrained(model_name)
 def tokenize_function(examples):
     return tokenizer(examples["text"])
 
-split_dataset = split_dataset_by_node(dataset, num_nodes=6)
+split_dataset = split_dataset_by_node(dataset, world_size=14)
 
 tokenized_dataset = split_dataset.map(tokenize_function, batched=True, num_proc=22, remove_columns=["text"])
 
