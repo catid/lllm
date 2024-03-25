@@ -1,12 +1,10 @@
 from datasets import load_dataset
 from datasets.distributed import split_dataset_by_node
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
-import deepspeed
+from accelerate import Accelerator
 
 # Initialize DeepSpeed
-deepspeed.init_distributed()
-rank = deepspeed.comm.get_rank()
-world_size = deepspeed.comm.get_world_size()
+accelerator = Accelerator()
 
 # Load the dataset
 dataset = load_dataset("allenai/dolma", split="train", name="v1_6-sample")
@@ -21,9 +19,9 @@ model = AutoModelForCausalLM.from_pretrained(model_name)
 def tokenize_function(examples):
     return tokenizer(examples["text"])
 
-split_dataset = split_dataset_by_node(dataset, rank=rank, world_size=world_size)
+split_dataset = split_dataset_by_node(dataset, rank=accelerator.process_index, world_size=accelerator.num_processes)
 
-tokenized_dataset = split_dataset.map(tokenize_function, batched=True, num_proc=22, remove_columns=["text"])
+tokenized_dataset = split_dataset.map(tokenize_function, batched=True, num_proc=16, remove_columns=["text"])
 
 # Define the training arguments with DeepSpeed configuration
 training_args = TrainingArguments(
