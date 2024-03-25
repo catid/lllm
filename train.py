@@ -33,8 +33,10 @@ tokenized_dataset = split_dataset.map(tokenize_function, batched=True, num_proc=
 # Define the training arguments with DeepSpeed configuration
 training_args = TrainingArguments(
     output_dir="output",
-    num_train_epochs=3,
     per_device_train_batch_size=4,
+    gradient_accumulation_steps=2,
+    fp16=True,
+    num_train_epochs=3,
     save_steps=10_000,
     save_total_limit=2,
     deepspeed="deepspeed_config.json",  # Path to DeepSpeed configuration file

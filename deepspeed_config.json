@@ -1,10 +1,10 @@
 {
     "_read_the_docs": "https://www.deepspeed.ai/docs/config-json/",
   
-    "train_micro_batch_size_per_gpu": 256,
+    "train_micro_batch_size_per_gpu": 4,
     "gradient_accumulation_steps": 2,
 
-    "gradient_clipping": 5.0,
+    "gradient_clipping": 1.0,
     "prescale_gradients": true,
 
     "steps_per_print": 100,
