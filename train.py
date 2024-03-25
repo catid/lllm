@@ -78,8 +78,10 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 
 # Tokenize the dataset
+tokenizer.pad_token = tokenizer.eos_token
+
 def tokenize_function(examples):
-    return tokenizer(examples["text"], padding=True, truncation=True, return_tensors="pt")
+    return tokenizer(examples["text"], padding="max_length", truncation=True, return_tensors="pt", max_length=1024)
 
 split_dataset = split_dataset_by_node(dataset, rank=rank, world_size=world_size)
 
