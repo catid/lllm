@@ -17,7 +17,10 @@ from deepspeed import log_dist
 from deepspeed.runtime.config import DeepSpeedConfig
 
 # Initialize DeepSpeed
-deepspeed.init_distributed()
+deepspeed.init_distributed(
+    dist_backend="nccl",
+    verbose="false"
+)
 rank = comm.get_rank() # global rank
 local_rank = comm.get_local_rank()
 world_size = comm.get_world_size()
@@ -44,7 +47,7 @@ def get_true_random_32bit_positive_integer():
     random_int = int.from_bytes(bytes(random_bytes), byteorder='big')
     return random_int
 
-def synchronize_seed(local_rank, rank, seed=-1):
+def synchronize_seed(local_rank, rank, seed=1337):
     if seed < 0:
         seed = get_true_random_32bit_positive_integer()
 
@@ -85,26 +88,41 @@ def tokenize_function(examples):
 
 split_dataset = split_dataset_by_node(dataset, rank=rank, world_size=world_size)
 
-tokenized_dataset = split_dataset.map(tokenize_function, batched=True, num_proc=32, remove_columns=["text"])
+tokenized_dataset = split_dataset.map(tokenize_function, batched=True, num_proc=24, remove_columns=["text"])
 
-# Define the training arguments with DeepSpeed configuration
-training_args = TrainingArguments(
-    output_dir="output",
-    per_device_train_batch_size=4,
-    gradient_accumulation_steps=2,
-    fp16=True,
-    num_train_epochs=3,
-    save_steps=10_000,
-    save_total_limit=2,
-    deepspeed="deepspeed_config.json",  # Path to DeepSpeed configuration file
-)
+def make_optimizer(model, args):
+    model_parameters = list(model.parameters())
+    optimizer_params = [p for p in model_parameters if not hasattr(p, "_optim")]
+    optimizer = torch.optim.AdamW(optimizer_params, lr=args.lr, weight_decay=args.weight_decay)
+    return optimizer
 
-# Create the Trainer with DeepSpeed
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=tokenized_dataset,
-)
+from torch.nn import CrossEntropyLoss
 
-# Train the model with DeepSpeed
-trainer.train()
+def train_function(model, tokenizer, train_dataset, data_collator, optimizer, lr_scheduler, num_epochs):
+    model.train()
+    train_dataloader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=training_args.per_device_train_batch_size, collate_fn=data_collator, shuffle=True
+    )
+    loss_fn = CrossEntropyLoss()
+
+    for epoch in range(num_epochs):
+        for batch in train_dataloader:
+            input_ids = batch["input_ids"].to(model.device)
+            attention_mask = batch["attention_mask"].to(model.device)
+            labels = input_ids.clone()
+
+            outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
+            logits = outputs.logits
+
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+
+            loss = loss_fn(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            lr_scheduler.step()
+
+        model.save_pretrained(f"output/checkpoint-{epoch}")
+        tokenizer.save_pretrained(f"output/checkpoint-{epoch}")
