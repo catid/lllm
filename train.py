@@ -3,6 +3,11 @@ from datasets.distributed import split_dataset_by_node
 from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
 import deepspeed
 
+# Initialize DeepSpeed
+deepspeed.init_distributed()
+rank = deepspeed.comm.get_rank()
+world_size = deepspeed.comm.get_world_size()
+
 # Load the dataset
 dataset = load_dataset("allenai/dolma", split="train", name="v1_6-sample")
 print(dataset)
@@ -16,7 +21,7 @@ model = AutoModelForCausalLM.from_pretrained(model_name)
 def tokenize_function(examples):
     return tokenizer(examples["text"])
 
-split_dataset = split_dataset_by_node(dataset, world_size=14)
+split_dataset = split_dataset_by_node(dataset, rank=rank, world_size=world_size)
 
 tokenized_dataset = split_dataset.map(tokenize_function, batched=True, num_proc=22, remove_columns=["text"])
 
@@ -29,9 +34,6 @@ training_args = TrainingArguments(
     save_total_limit=2,
     deepspeed="deepspeed_config.json",  # Path to DeepSpeed configuration file
 )
-
-# Initialize DeepSpeed
-deepspeed.init_distributed()
 
 # Create the Trainer with DeepSpeed
 trainer = Trainer(
