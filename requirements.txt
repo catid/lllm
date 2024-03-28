@@ -10,3 +10,5 @@ transformers[torch]
 pytest
 
 #mamba_ssm
+
+torch_optimizer @ git+https://github.com/jettify/pytorch-optimizer.git
