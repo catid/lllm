@@ -31,3 +31,13 @@ pytest
 ```bash
 ./launch_local_train.sh
 ```
+
+# Ideas
+
+* Non-causal prompt processing for first half of the sequence, causal for the second half - This would allow us to do some kind of rolling context compression for long sequences
+* Take LLaMA-3 70B Instruct-tuned output from each data chunk, and train the model to generate the same continuations (a way to skip fine-tuning?)
+* RHO-loss for the dataset using LLaMA-3 8B to provide reference loss for each token - need to convert to our tokenizer via approximation
+* Produce 4 tokens at once
+* Train on 8K context
+* 90% RWKV-6, 10% Full Attention similar to Infini-Attention
+* MambaByte/SpaceByte style tokenization instead of using RWKV tokenizer

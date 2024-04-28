@@ -1,14 +1,14 @@
-torch
-xformers
+# Community projects
 numpy
-deepspeed
-
-huggingface_hub[cli]
-datasets
-transformers[torch]
-
 pytest
 
-#mamba_ssm
+# Meta products
+torch
+schedulefree
 
-torch_optimizer @ git+https://github.com/jettify/pytorch-optimizer.git
+# HuggingFace products
+huggingface_hub[cli]
+datasets
+
+# Microsoft products
+deepspeed
