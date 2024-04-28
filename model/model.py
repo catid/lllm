@@ -10,21 +10,6 @@ from model.srmsnorm import FastSimpleRMSNorm
 
 from dataclasses import dataclass
 
-@dataclass
-class LatentLanguageConfig:
-    vocab_size: int = 65529 # Match RWKV
-    dim: int = 512 # Narrower
-    layers: int = 12 # Small
-
-    kv_heads: int = 8 # Half Q heads
-    q_heads: int = 16 # Standardish number
-    dim_head: int = 64 # Decent size
-
-    ffn_mult: int = 4 # Standardish number
-    ffn_bias: bool = False # Seems fine to leave these off for perf
-
-    dropout: float = 0.1
-
 # Simple Gated Linear Unit
 # From "TransNormerLLM" (Qin et al, 2024) https://arxiv.org/pdf/2307.14995.pdf
 class SGLULayer(nn.Module):
@@ -112,6 +97,21 @@ class GQALayer(nn.Module):
 
         out = einops.rearrange(out, 'b n h d -> b n (h d)', h=self.heads_q)
         return self.o_proj(out)
+
+@dataclass
+class LatentLanguageConfig:
+    vocab_size: int = 65529 # Match RWKV
+    dim: int = 512 # Narrower
+    layers: int = 12 # Small
+
+    kv_heads: int = 8 # Half Q heads
+    q_heads: int = 16 # Standardish number
+    dim_head: int = 64 # Decent size
+
+    ffn_mult: int = 4 # Standardish number
+    ffn_bias: bool = False # Seems fine to leave these off for perf
+
+    dropout: float = 0.1
 
 class LatentLanguage(nn.Module):
     def __init__(self, cfg):

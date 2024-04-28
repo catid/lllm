@@ -3,7 +3,8 @@ import os
 
 from datasets import load_dataset
 from datasets.distributed import split_dataset_by_node
-from transformers import AutoTokenizer, AutoModelForCausalLM
+
+from model.model import LatentLanguage, LatentLanguageConfig
 
 import schedulefree # optimizer
 
@@ -146,17 +147,15 @@ def save_deepspeed_model_engine(model_engine, fp16, args):
 def main(args):
     t0 = time.time()
 
-    # Load the tokenizer and model
-    model_name = "gpt2"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(model_name)
-
     # Initialize DeepSpeed
     deepspeed.init_distributed(
         dist_backend="nccl",
         verbose="false"
     )
+
+    cfg=LatentLanguageConfig()
+
+    model = LatentLanguage(cfg)
 
     optimizer = schedulefree.AdamWScheduleFree(
         model.parameters(),

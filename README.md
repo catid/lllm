@@ -24,6 +24,9 @@ pip install -r requirements.txt
 
 # Run unit tests to make sure everything is working
 pytest
+
+# Download the dataset
+python -m dataset.download_dataset
 ```
 
 ## Train
