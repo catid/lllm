@@ -39,9 +39,19 @@ add_library(${PROJECT_NAME} SHARED
     dataloader.cpp
     mapped_file.cpp
     mapped_file.hpp
+    compressor.cpp
+    compressor.hpp
     ${ZSTD_SRC_FILES}
     ${ZSTD_HEADER_FILES}
 )
 target_include_directories(${PROJECT_NAME} PRIVATE ${PYTHON_INCLUDE_DIRS} ${ZSTD_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} ${PYTHON_LIBRARIES} Threads::Threads)
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "")
+
+# Test executable test_compressor
+add_executable(test_compressor tests/test_compressor.cpp)
+target_link_libraries(test_compressor ${PROJECT_NAME})
+
+# Test executable test_mapped_file
+add_executable(test_mapped_file tests/test_mapped_file.cpp)
+target_link_libraries(test_mapped_file ${PROJECT_NAME})

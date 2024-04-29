@@ -29,5 +29,5 @@ private:
     const void* data_ = nullptr;
     size_t size_ = 0;
     bool is_valid_ = false;
-    int shm_fd_ = -1;
+    int fd_ = -1;
 };
