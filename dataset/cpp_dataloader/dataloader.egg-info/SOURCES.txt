@@ -1,0 +1,6 @@
+README.md
+setup.py
+dataloader.egg-info/PKG-INFO
+dataloader.egg-info/SOURCES.txt
+dataloader.egg-info/dependency_links.txt
+dataloader.egg-info/top_level.txt

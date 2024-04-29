@@ -1,0 +1,16 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/catid/sources/lllm/dataset/cpp_dataloader/zstd/common/portability_macros.h
+cet.h
+-
+
+/home/catid/sources/lllm/dataset/cpp_dataloader/zstd/decompress/huf_decompress_amd64.S
+../common/portability_macros.h
+/home/catid/sources/lllm/dataset/cpp_dataloader/zstd/common/portability_macros.h
+
