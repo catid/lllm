@@ -12,5 +12,11 @@ Modify the copy_hosts.txt file to point to the hosts you are using for training.
 
 ```bash
 sudo apt install parallel rsync
+cd dataset/cpp_dataloader
+python setup.py install
+cd ../..
+```
+
+```bash
 ./copy_dataset.sh
 ```

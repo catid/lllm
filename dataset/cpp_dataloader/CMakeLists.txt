@@ -37,6 +37,8 @@ endif()
 
 add_library(${PROJECT_NAME} SHARED
     dataloader.cpp
+    mapped_file.cpp
+    mapped_file.hpp
     ${ZSTD_SRC_FILES}
     ${ZSTD_HEADER_FILES}
 )
