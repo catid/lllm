@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstdint>
 
+#include <iostream>
+
 
 //------------------------------------------------------------------------------
 // Constants
@@ -37,6 +39,7 @@ bool Compressor::Compress(const void* data, int bytes)
     words[0] = ZDATA_HEADER_MAGIC;
     words[1] = bytes;
 
+    Result.resize(ZDATA_HEADER_BYTES + result);
     return true;
 }
 
@@ -51,7 +54,6 @@ bool Decompressor::Decompress(const void* data, int bytes)
     }
 
     const uint32_t* words = reinterpret_cast<const uint32_t*>( data );
-
     if (words[0] != ZDATA_HEADER_MAGIC) {
         return false;
     }
@@ -63,7 +65,7 @@ bool Decompressor::Decompress(const void* data, int bytes)
         Result.data(),
         original_size,
         (const uint8_t*)data + ZDATA_HEADER_BYTES,
-        bytes);
+        bytes - ZDATA_HEADER_BYTES);
 
     if (ZSTD_isError(result) || result != original_size) {
         return false;
