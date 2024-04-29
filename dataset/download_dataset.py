@@ -54,7 +54,7 @@ def token_worker_task(write_task_queue, tokenizer, texts):
         # Split each text into chunks of up to 8192 tokens
         chunked_token_ids = []
         for tokens in token_ids:
-            chunks = [tokens[i:i+args.context] for i in range(0, len(tokens), args.context)]
+            chunks = [tokens[i:i+args.max_tokens] for i in range(0, len(tokens), args.max_tokens)]
             # Drop the last chunk of a set if it has fewer than min_tokens
             if len(chunks) > 0 and len(chunks[-1]) < args.min_tokens:
                 chunks = chunks[:-1]
@@ -152,6 +152,7 @@ if __name__ == '__main__':
     parser.add_argument('--chunk_size', type=int, default=1000, help="Number of texts to process in each chunk")
     parser.add_argument('--context', type=int, default=8192, help="Max tokens per chunk")
     parser.add_argument('--min_tokens', type=int, default=1024, help="Min tokens and end of chunk split")
+    parser.add_argument('--max_tokens', type=int, default=131072, help="Max tokens and end of chunk split")
     parser.add_argument('--dest', type=str, default='', help="Destination folder to save the tokenized data. Default is '~/dataset'.")
     parser.add_argument('--num_workers', type=int, default=8, help="Number of workers")
     args = parser.parse_args()

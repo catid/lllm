@@ -1,13 +1,4 @@
-from dataloader import compressData
-import ctypes
+from dataloader import cpp_write_token_arrays
 
-# Example usage
-input_data = b"Hello, World!"
-input_size = len(input_data)
-output_size = 100  # Provide a sufficient output buffer size
-
-output_buffer = ctypes.create_string_buffer(output_size)
-compressed_size = compressData(input_data, input_size, output_buffer, output_size)
-
-compressed_data = output_buffer.raw[:compressed_size]
-print("Compressed data:", compressed_data)
+def write_token_arrays(token_arrays, output_file):
+    return cpp_write_token_arrays(token_arrays, len(token_arrays), output_file)
