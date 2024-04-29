@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(dataloader C CXX)
+project(cpp_dataloader C CXX)
 
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
 
