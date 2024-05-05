@@ -53,8 +53,10 @@ add_library(${PROJECT_NAME} SHARED
     ${ZSTD_SRC_FILES}
     ${ZSTD_HEADER_FILES}
 )
-target_include_directories(${PROJECT_NAME} PRIVATE
+target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/yaml
     ${CMAKE_CURRENT_SOURCE_DIR}/cityhash
     ${CMAKE_CURRENT_SOURCE_DIR}/cpppath

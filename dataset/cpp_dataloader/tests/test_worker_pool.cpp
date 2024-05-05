@@ -30,12 +30,12 @@ bool TestMultipleTasks() {
     std::vector<int> results;
     std::mutex results_mutex;
 
-    const int num_tasks = 1000;
+    const int num_tasks = 10000000;
     for (int i = 0; i < num_tasks; ++i) {
         pool.QueueTask([&, i]() {
             std::lock_guard<std::mutex> lock(results_mutex);
             results.push_back(i);
-        }, 2);
+        });
     }
 
     pool.WaitForTasks();

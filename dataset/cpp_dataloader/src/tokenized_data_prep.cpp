@@ -44,7 +44,7 @@ bool TokenizedDataPrep::WriteTokenizedText(
             return false;
         }
     }
-
+#if 0
     // Split high and low bytes of the tokens
     packed_buffer_.resize(text_length * sizeof(uint16_t));
     uint8_t* low_buffer = packed_buffer_.data();
@@ -91,7 +91,7 @@ bool TokenizedDataPrep::WriteTokenizedText(
     if (current_file_.fail() || current_index_.fail()) {
         return false;
     }
-
+#endif
     return true;
 }
 
@@ -100,6 +100,7 @@ bool TokenizedDataPrep::Finalize() {
         return true;
     }
 
+#if 0
     // Last 64 bits is the file hash for verification
     current_file_.write(reinterpret_cast<const char*>(&current_file_hash_), sizeof(current_file_hash_));
     current_index_.write(reinterpret_cast<const char*>(&current_index_hash_), sizeof(current_index_hash_));
@@ -117,4 +118,6 @@ bool TokenizedDataPrep::Finalize() {
     current_file_number_++;
     current_file_size_ = 0;
     return success;
+#endif
+    return true;
 }

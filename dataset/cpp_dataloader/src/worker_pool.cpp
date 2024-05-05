@@ -43,6 +43,10 @@ ThreadWorker::ThreadWorker(int cpu_id_affinity)
 ThreadWorker::~ThreadWorker()
 {
     Terminated = true;
+    {
+        std::unique_lock<std::mutex> lock(Lock);
+        Condition.notify_one();
+    }
     JoinThread(Thread);
     Thread = nullptr;
 }
