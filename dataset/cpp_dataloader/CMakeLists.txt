@@ -31,31 +31,42 @@ file(GLOB_RECURSE ZSTD_HEADER_FILES
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
     enable_language(ASM)
-    file(GLOB_RECURSE ZSTD_ASM_FILES "${CMAKE_CURRENT_SOURCE_DIR}/zstd/*.S")
+    file(GLOB_RECURSE ZSTD_ASM_FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/zstd/*.S")
     list(APPEND ZSTD_SRC_FILES ${ZSTD_ASM_FILES})
 endif()
 
+file(GLOB_RECURSE DATALOADER_HEADER_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp")
+file(GLOB_RECURSE DATALOADER_SRC_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+
+# Project library target
 add_library(${PROJECT_NAME} SHARED
-    dataloader.cpp
-    mapped_file.cpp
-    mapped_file.hpp
-    compressor.cpp
-    compressor.hpp
-    tokenized_data_loader.cpp
-    tokenized_data_loader.hpp
-    tokenized_data_prep.cpp
-    tokenized_data_prep.hpp
+    ${DATALOADER_HEADER_FILES}
+    ${DATALOADER_SRC_FILES}
     cityhash/city.cc
     cityhash/city.h
     yaml/yaml.cpp
     yaml/yaml.hpp
     cpppath/cpppath.h
+    worker_pool.cpp
+    worker_pool.hpp
     ${ZSTD_SRC_FILES}
     ${ZSTD_HEADER_FILES}
 )
-target_include_directories(${PROJECT_NAME} PRIVATE ${PYTHON_INCLUDE_DIRS} ${ZSTD_INCLUDE_DIRS})
-target_link_libraries(${PROJECT_NAME} ${PYTHON_LIBRARIES} Threads::Threads)
-set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "")
+target_include_directories(third_party PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/yaml
+    ${CMAKE_CURRENT_SOURCE_DIR}/cityhash
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpppath
+    ${CMAKE_CURRENT_SOURCE_DIR}/worker_pool
+    ${CMAKE_CURRENT_SOURCE_DIR}/zstd
+    ${PYTHON_INCLUDE_DIRS}
+)
+target_link_libraries(${PROJECT_NAME} PUBLIC
+    ${PYTHON_LIBRARIES}
+    Threads::Threads
+)
 
 # Test executable test_compressor
 add_executable(test_compressor tests/test_compressor.cpp)

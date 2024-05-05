@@ -5,12 +5,17 @@
 #include <vector>
 #include <fstream>
 
+#include "dataloader.hpp"
+#include "worker_pool.hpp"
 #include "compressor.hpp"
-#include "yaml/yaml.hpp"
+
+#include <yaml.hpp>
 
 static const uint64_t kMaxFileSize = 4ULL * 1024 * 1024 * 1024;
 
-bool data_verify(const char* data_folder_path);
+
+//------------------------------------------------------------------------------
+// TokenizedDataPrep
 
 class TokenizedDataPrep {
 public:
@@ -35,4 +40,6 @@ private:
     std::ofstream current_index_;
     uint64_t current_file_hash_ = 0;
     uint64_t current_index_hash_ = 0;
+
+    WorkerPool pool_;
 };

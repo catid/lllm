@@ -4,8 +4,14 @@
 #include <string>
 #include <vector>
 
+#include "dataloader.hpp"
 #include "compressor.hpp"
 #include "mapped_file.hpp"
+#include "worker_pool.hpp"
+
+
+//------------------------------------------------------------------------------
+// TokenizedDataLoader
 
 class TokenizedDataLoader {
 public:
@@ -20,3 +26,9 @@ private:
     uint32_t micro_batch_size_ = 0;
     uint32_t context_size_ = 0;
 };
+
+
+//------------------------------------------------------------------------------
+// Verify
+
+bool data_verify(const char* data_folder_path);

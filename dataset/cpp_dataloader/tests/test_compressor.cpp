@@ -1,4 +1,4 @@
-#include "../compressor.hpp"
+#include <compressor.hpp>
 
 #include <cstdlib>
 #include <cstdint>

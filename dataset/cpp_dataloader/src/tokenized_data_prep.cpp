@@ -1,7 +1,11 @@
 #include "tokenized_data_prep.hpp"
 
-#include "cityhash/city.h"
-#include "cpppath/cpppath.h"
+#include <city.h>
+#include <cpppath.h>
+
+
+//------------------------------------------------------------------------------
+// TokenizedDataPrep
 
 TokenizedDataPrep::TokenizedDataPrep(const std::string& data_folder_path)
     : data_folder_path_(data_folder_path) {}
@@ -85,9 +89,4 @@ bool TokenizedDataPrep::Finalize() {
     current_file_number_++;
     current_file_size_ = 0;
     return success;
-}
-
-bool data_verify(const char* data_folder_path)
-{
-    
 }

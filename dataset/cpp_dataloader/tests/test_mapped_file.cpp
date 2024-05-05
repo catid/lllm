@@ -1,4 +1,4 @@
-#include "../mapped_file.hpp"
+#include <mapped_file.hpp>
 
 #include <fcntl.h>
 #include <unistd.h>

@@ -2,6 +2,14 @@
 
 #include <algorithm>
 #include <random>
+#include <iostream>
+
+#include <cpppath.h>
+#include <yaml.hpp>
+
+
+//------------------------------------------------------------------------------
+// TokenizedDataLoader
 
 bool TokenizedDataLoader::LoadTokenArrays(const std::string& index_file) {
     MappedFileReader index_reader;
@@ -82,4 +90,41 @@ bool TokenizedDataLoader::GetTokenArray(
     *num_tokens = num_elements;
 
     return true;
+}
+
+
+//------------------------------------------------------------------------------
+// Verify
+
+bool data_verify(const char* data_folder_path)
+{
+    std::string index_file_path = cpppath::join({data_folder_path, DATALOADER_MAIN_INDEX_FILE});
+
+    Yaml::Node root;
+
+    try {
+        Yaml::Parse(root, index_file_path);
+
+        Yaml::Node data_items = root["data_files"];
+
+        for(auto it = data_items.Begin(); it != data_items.End(); it++)
+        {
+            std::cout << (*it).first << ": " << (*it).second.As<string>() << std::endl;
+        }
+
+    } catch (Yaml::Exception& e) {
+        std::cerr << "Error parsing index file: " << e.what() << std::endl;
+        return false;
+    }
+
+    WorkerPool pool;
+    pool.Start();
+
+    const int num_workers = pool.GetWorkerCount();
+
+    for (int i = 0; i < num_workers; ++i) {
+        pool.QueueTask([&]() {
+            // FIXME
+        });
+    }
 }

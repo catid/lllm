@@ -1,6 +1,6 @@
 #include "compressor.hpp"
 
-#include "zstd/zstd.h"
+#include <zstd.h>
 
 #include <cstdlib>
 #include <cstdint>
