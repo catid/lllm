@@ -50,12 +50,11 @@ add_library(${PROJECT_NAME} SHARED
     yaml/yaml.cpp
     yaml/yaml.hpp
     cpppath/cpppath.h
-    worker_pool.cpp
-    worker_pool.hpp
     ${ZSTD_SRC_FILES}
     ${ZSTD_HEADER_FILES}
 )
-target_include_directories(third_party PRIVATE
+target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/yaml
     ${CMAKE_CURRENT_SOURCE_DIR}/cityhash
     ${CMAKE_CURRENT_SOURCE_DIR}/cpppath
