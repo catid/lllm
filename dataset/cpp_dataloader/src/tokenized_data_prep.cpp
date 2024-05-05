@@ -5,12 +5,40 @@
 
 
 //------------------------------------------------------------------------------
+// CompressorWorker
+
+void CompressorWorker::Start(
+    OnFileComplete on_file_complete,
+    OnFileStart on_file_start)
+{
+    on_file_complete_ = on_file_complete;
+    on_file_start_ = on_file_start;
+    worker_ = std::make_shared<ThreadWorker>();
+}
+
+bool CompressorWorker::Stop()
+{
+    worker_ = nullptr;
+}
+
+bool CompressorWorker::WriteTokenizedText(
+    const uint32_t* tokenized_text,
+    uint32_t text_length)
+{
+
+}
+
+
+//------------------------------------------------------------------------------
 // TokenizedDataPrep
 
 TokenizedDataPrep::TokenizedDataPrep(const std::string& data_folder_path)
     : data_folder_path_(data_folder_path) {}
 
-bool TokenizedDataPrep::WriteTokenizedText(const uint16_t* tokenized_text, uint32_t text_length) {
+bool TokenizedDataPrep::WriteTokenizedText(
+    const uint32_t* tokenized_text,
+    uint32_t text_length)
+{
     if (current_file_size_ >= kMaxFileSize) {
         if (!Finalize()) {
             return false;
@@ -52,13 +80,13 @@ bool TokenizedDataPrep::WriteTokenizedText(const uint16_t* tokenized_text, uint3
     uint32_t current_offset = static_cast<uint32_t>( current_file_size_ );
     current_index_.write(reinterpret_cast<const char*>(&current_offset), sizeof(current_offset));
 
-    current_index_hash_ ^= CityHash64(reinterpret_cast<const char*>(&current_offset), sizeof(current_offset)); 
+    current_index_hash_ ^= CityHash64(reinterpret_cast<const char*>(&current_offset), sizeof(current_offset));
 
     // Write the compressed data to the current file
     current_file_.write(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size());
     current_file_size_ += compressor.Result.size();
 
-    current_file_hash_ ^= CityHash64(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size()); 
+    current_file_hash_ ^= CityHash64(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size());
 
     if (current_file_.fail() || current_index_.fail()) {
         return false;

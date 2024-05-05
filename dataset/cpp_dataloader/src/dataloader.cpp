@@ -6,9 +6,9 @@ extern "C" {
 //------------------------------------------------------------------------------
 // Data Loader
 
-void* data_loader_create(const char* index_file) { 
+void* data_loader_create(const char* index_file) {
     TokenizedDataLoader* loader = new TokenizedDataLoader();
-    if (!loader->LoadTokenArrays(index_file)) {
+    if (!loader->Load(index_file)) {
         delete loader;
         return nullptr;
     }
@@ -36,10 +36,15 @@ bool data_loader_get_micro_batch(
     uint32_t context_size,
     uint32_t* micro_batch_size,
     uint32_t* num_tokens,
-    uint16_t* output_array)
+    uint32_t* output_array)
 {
     TokenizedDataLoader* loader = static_cast<TokenizedDataLoader*>(data_loader);
-    return loader->GetTokenArray(microbatch_index, context_size, micro_batch_size, num_tokens, output_array);
+    return loader->GetTokenArray(
+        microbatch_index,
+        context_size,
+        micro_batch_size,
+        num_tokens,
+        output_array);
 }
 
 
@@ -56,7 +61,7 @@ void data_prep_destroy(void* data_prep) {
 
 bool data_prep_write_tokenized_text(
     void* data_prep,
-    const uint16_t* tokenized_text,
+    const uint32_t* tokenized_text,
     uint32_t text_length)
 {
     TokenizedDataPrep* prep = static_cast<TokenizedDataPrep*>(data_prep);

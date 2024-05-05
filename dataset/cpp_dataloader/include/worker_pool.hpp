@@ -23,6 +23,8 @@ public:
 
     const int32_t GetActiveTaskCount() const { return ActiveTasks; }
 
+    void WaitForTasks(int max_active_tasks = 0);
+
 protected:
     int CpuIdAffinity = -1;
 
@@ -45,13 +47,19 @@ protected:
 
 class WorkerPool {
 public:
-    ~WorkerPool();
+    ~WorkerPool() {
+        Stop();
+    }
 
     void Start(int worker_count = 0, bool use_thread_affinity = true);
+    void Stop();
+
+    void WaitForTasks();
 
     int GetWorkerCount() const { return Workers.size(); }
 
-    void QueueTask(TaskFn task);
+    // max_active_tasks: 0 means no limit. Otherwise, block until queue is short
+    void QueueTask(TaskFn task, int max_active_tasks = 0);
 
 private:
     std::vector<std::shared_ptr<ThreadWorker>> Workers;

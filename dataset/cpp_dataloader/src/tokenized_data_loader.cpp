@@ -11,7 +11,7 @@
 //------------------------------------------------------------------------------
 // TokenizedDataLoader
 
-bool TokenizedDataLoader::LoadTokenArrays(const std::string& index_file) {
+bool TokenizedDataLoader::Load(const std::string& index_file) {
     MappedFileReader index_reader;
     if (!index_reader.Open(index_file)) {
         return false;
@@ -59,7 +59,7 @@ bool TokenizedDataLoader::GetTokenArray(
     uint32_t context_size,
     uint32_t* micro_batch_size,
     uint32_t* num_tokens,
-    uint16_t* output_array)
+    uint32_t* output_array)
 {
     if (microbatch_index >= microbatch_indices_.size()) {
         return false;
@@ -109,7 +109,7 @@ bool data_verify(const char* data_folder_path)
 
         for(auto it = data_items.Begin(); it != data_items.End(); it++)
         {
-            std::cout << (*it).first << ": " << (*it).second.As<string>() << std::endl;
+            std::cout << (*it).first << ": " << (*it).second.As<std::string>() << std::endl;
         }
 
     } catch (Yaml::Exception& e) {

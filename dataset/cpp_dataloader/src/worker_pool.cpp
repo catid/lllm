@@ -6,6 +6,14 @@
 #include <pthread.h>
 #endif
 
+#include "tools.hpp"
+
+#include <cstdlib>
+
+
+//------------------------------------------------------------------------------
+// Tools
+
 static void set_thread_affinity(int cpu_id) { static
     // Set thread affinity
     #ifdef _WIN32
@@ -35,6 +43,8 @@ ThreadWorker::ThreadWorker(int cpu_id_affinity)
 ThreadWorker::~ThreadWorker()
 {
     Terminated = true;
+    JoinThread(Thread);
+    Thread = nullptr;
 }
 
 void ThreadWorker::Loop()
@@ -73,6 +83,13 @@ void ThreadWorker::QueueTask(TaskFn task)
     Condition.notify_one();
 }
 
+void ThreadWorker::WaitForTasks(int max_active_tasks)
+{
+    while (!Terminated && ActiveTasks > max_active_tasks) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+
 
 //------------------------------------------------------------------------------
 // WorkerPool
@@ -101,31 +118,49 @@ void WorkerPool::Start(int worker_count, bool use_thread_affinity)
     }
 }
 
-WorkerPool::~WorkerPool()
+void WorkerPool::Stop()
 {
     Workers.clear();
 }
 
-void WorkerPool::QueueTask(TaskFn task)
+void WorkerPool::WaitForTasks()
+{
+    for (auto& worker : Workers) {
+        worker->WaitForTasks();
+    }
+}
+
+void WorkerPool::QueueTask(TaskFn task, int max_active_tasks)
 {
     // Find the least busy worker.
     int best_active_tasks = -1;
     int best_i = -1;
 
-    for (int i = 0; i < Workers.size(); ++i) {
-        int active_tasks = Workers[i]->GetActiveTaskCount();
+    for (;;) {
+        for (int i = 0; i < Workers.size(); ++i) {
+            int active_tasks = Workers[i]->GetActiveTaskCount();
 
-        // Any idle worker is fine.
-        if (active_tasks <= 0) {
-            Workers[i]->QueueTask(task);
-            return;
+            // Any idle worker is fine.
+            if (active_tasks <= 0) {
+                Workers[i]->QueueTask(task);
+                return;
+            }
+
+            if (best_active_tasks < 0 || active_tasks < best_active_tasks) {
+                best_active_tasks = active_tasks;
+                best_i = i;
+            }
         }
 
-        if (best_active_tasks < 0 || active_tasks < best_active_tasks) {
-            best_active_tasks = active_tasks;
-            best_i = i;
+        if (max_active_tasks <= 0 || best_active_tasks < max_active_tasks) {
+            break;
         }
+
+        // Wait and try to find a less busy worker
+        std::this_thread::sleep_for(std::chrono::milliseconds(10 + rand() % 10));
     }
 
-    Workers[best_i]->QueueTask(task);
+    if (best_i != -1) {
+        Workers[best_i]->QueueTask(task);
+    }
 }

@@ -74,3 +74,7 @@ target_link_libraries(test_compressor ${PROJECT_NAME})
 # Test executable test_mapped_file
 add_executable(test_mapped_file tests/test_mapped_file.cpp)
 target_link_libraries(test_mapped_file ${PROJECT_NAME})
+
+# Test executable test_worker_pool
+add_executable(test_worker_pool tests/test_worker_pool.cpp)
+target_link_libraries(test_worker_pool ${PROJECT_NAME})
