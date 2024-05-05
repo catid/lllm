@@ -1,5 +1,5 @@
 import unittest
-from model.tokenizer import TRIE_TOKENIZER
+from dataset.tokenizer import TRIE_TOKENIZER
 vocab_file = "rwkv_vocab_v20230424.txt"
 
 class TestTRIETokenizer(unittest.TestCase):

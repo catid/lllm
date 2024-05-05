@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from datasets import load_dataset
 
 # Assuming TRIE_TOKENIZER is your custom tokenizer
-from model.tokenizer import TRIE_TOKENIZER
+from dataset.tokenizer import TRIE_TOKENIZER
 
 class DatasetLoader:
     def __init__(self, dataset_name, dataset_config, tokenizer_file="rwkv_vocab_v20230424.txt"):

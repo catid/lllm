@@ -41,6 +41,15 @@ add_library(${PROJECT_NAME} SHARED
     mapped_file.hpp
     compressor.cpp
     compressor.hpp
+    tokenized_data_loader.cpp
+    tokenized_data_loader.hpp
+    tokenized_data_prep.cpp
+    tokenized_data_prep.hpp
+    cityhash/city.cc
+    cityhash/city.h
+    yaml/yaml.cpp
+    yaml/yaml.hpp
+    cpppath/cpppath.h
     ${ZSTD_SRC_FILES}
     ${ZSTD_HEADER_FILES}
 )
