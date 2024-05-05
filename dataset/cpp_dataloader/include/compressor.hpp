@@ -7,12 +7,11 @@
 //------------------------------------------------------------------------------
 // Constants
 
-#define ZDATA_HEADER_BYTES 8
-#define ZDATA_HEADER_MAGIC 0xCA7DDEED
+#define ZDATA_HEADER_BYTES 3
 /*
-    Header size: 8 bytes
+    Header size: 3 bytes
 
-    <Magic(4 bytes)> <OriginalSize(4 bytes)>
+    <OriginalSize(3 bytes)>
 */
 
 
@@ -20,8 +19,9 @@
 // Compressor
 
 struct Compressor {
-    bool Compress(const void* data, int bytes);
+    bool Compress(const void* data, int bytes, int byte_stride = 0);
 
+    std::vector<uint8_t> Packed;
     std::vector<uint8_t> Result;
 };
 
@@ -30,7 +30,8 @@ struct Compressor {
 // Decompressor
 
 struct Decompressor {
-    bool Decompress(const void* data, int bytes);
+    bool Decompress(const void* data, int bytes, int byte_stride = 0);
 
+    std::vector<uint8_t> Packed;
     std::vector<uint8_t> Result;
 };

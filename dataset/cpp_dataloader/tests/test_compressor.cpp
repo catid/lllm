@@ -106,9 +106,54 @@ void TestCompressDecompressVector() {
     std::cout << "TestCompressDecompressVector: Passed" << std::endl;
 }
 
+// Test case for compressing and decompressing with different byte strides
+void TestCompressDecompressByteStride() {
+    Compressor compressor;
+    Decompressor decompressor;
+
+    // Generate test data
+    const int data_size = 1024 * 3 * 5 * 7;
+    std::vector<uint8_t> original_data(data_size);
+    for (int i = 0; i < data_size; ++i) {
+        original_data[i] = static_cast<uint8_t>(i % 256);
+    }
+
+    // Test byte strides from 1 to 8
+    for (int byte_stride = 1; byte_stride <= 8; ++byte_stride) {
+        // Compress the data with the current byte stride
+        bool compress_result = compressor.Compress(original_data.data(), original_data.size(), byte_stride);
+        if (!compress_result) {
+            std::cout << "TestCompressDecompressByteStride: Compression failed for byte_stride " << byte_stride << std::endl;
+            return;
+        }
+
+        // Get the compressed data
+        const std::vector<uint8_t>& compressed_data = compressor.Result;
+
+        // Decompress the compressed data with the same byte stride
+        bool decompress_result = decompressor.Decompress(compressed_data.data(), compressed_data.size(), byte_stride);
+        if (!decompress_result) {
+            std::cout << "TestCompressDecompressByteStride: Decompression failed for byte_stride " << byte_stride << std::endl;
+            return;
+        }
+
+        // Get the decompressed data
+        const std::vector<uint8_t>& decompressed_data = decompressor.Result;
+
+        // Check if the decompressed data matches the original data
+        if (!AreVectorsEqual(original_data, decompressed_data)) {
+            std::cout << "TestCompressDecompressByteStride: Decompressed data does not match the original for byte_stride " << byte_stride << std::endl;
+            return;
+        }
+    }
+
+    std::cout << "TestCompressDecompressByteStride: Passed" << std::endl;
+}
+
 int main() {
     TestCompressDecompressString();
     TestCompressDecompressVector();
+    TestCompressDecompressByteStride();
 
     return 0;
 }
