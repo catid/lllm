@@ -33,3 +33,5 @@ protected:
 void JoinThread(std::shared_ptr<std::thread> th);
 
 int64_t GetNsec();
+
+void set_thread_affinity(int cpu_id);

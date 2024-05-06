@@ -52,7 +52,9 @@ bool data_loader_get_micro_batch(
 // Data Preparation
 
 void* data_prep_create(const char* data_folder_path) {
-    return new TokenizedDataPrep(data_folder_path);
+    TokenizedDataPrep* prep = new TokenizedDataPrep();
+    prep->Start(data_folder_path);
+    return prep;
 }
 
 void data_prep_destroy(void* data_prep) {

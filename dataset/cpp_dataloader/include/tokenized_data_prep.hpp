@@ -21,45 +21,30 @@ static const uint64_t kMaxFileSize = 4ULL * 1024 * 1024 * 1024;
 
 
 //------------------------------------------------------------------------------
-// CompressorWorker
+// CompressorContext
 
-using OnFileComplete = std::function<void()>;
 using OnFileStart = std::function<void(std::string& data_file_path, std::string& index_file_path)>;
 
-class CompressorWorker {
+class CompressorContext {
 public:
-    ~CompressorWorker() {
-        Stop();
-    }
-
-    void Start(OnFileComplete on_file_complete, OnFileStart on_file_start);
-    bool Stop();
-
     bool WriteTokenizedText(
         const uint32_t* tokenized_text,
-        uint32_t text_length);
-
-    int GetActiveTaskCount() const {
-        if (!worker_) {
-            return 0;
-        }
-        return worker_->GetActiveTaskCount();
-    }
+        uint32_t text_length,
+        OnFileStart on_file_start);
 
 protected:
-    OnFileComplete on_file_complete_;
-    OnFileStart on_file_start_;
-
-    std::shared_ptr<ThreadWorker> worker_;
-    TokenizedAllocator allocator_;
-
+    std::string data_file_path_;
     std::ofstream current_file_;
-    std::ofstream current_index_;
     uint64_t current_file_hash_ = 0;
-    uint64_t current_index_hash_ = 0;
 
-    std::vector<uint8_t> packed_buffer_;
+    std::string index_file_path_;
+    std::ofstream current_index_;
+    uint64_t current_index_hash_ = 0;
+    uint64_t current_file_bytes_ = 0;
+
     Compressor compressor;
+
+    void ProcessBuffer(std::shared_ptr<TokenizedBuffer> buffer);
 };
 
 
@@ -68,7 +53,8 @@ protected:
 
 class TokenizedDataPrep {
 public:
-    TokenizedDataPrep(const std::string& data_folder_path);
+    void Start(const std::string& data_folder_path);
+    void Stop();
 
     bool WriteTokenizedText(const uint32_t* tokenized_text, uint32_t text_length);
     bool Finalize();
@@ -76,9 +62,13 @@ public:
 private:
     std::string data_folder_path_ = ".";
 
+    std::vector<std::shared_ptr<CompressorContext>> contexts_;
+    WorkerPool pool_;
+    TokenizedAllocator allocator_;
+
     int current_file_number_ = 0;
+    std::atomic<bool> worker_error_ = ATOMIC_VAR_INIT(false);
 
-    uint64_t current_file_size_ = 0;
-
-    std::ofstream global_index_;
+    std::mutex global_index_mutex_;
+    Yaml::Node global_index_;
 };

@@ -1,39 +1,16 @@
 #include "worker_pool.hpp"
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <pthread.h>
-#endif
-
 #include "tools.hpp"
 
 #include <cstdlib>
 
 
 //------------------------------------------------------------------------------
-// Tools
-
-static void set_thread_affinity(int cpu_id) { static
-    // Set thread affinity
-    #ifdef _WIN32
-        HANDLE thread_handle = GetCurrentThread();
-        DWORD_PTR thread_affinity_mask = 1LL << cpu_id;
-        SetThreadAffinityMask(thread_handle, thread_affinity_mask);
-    #else
-        cpu_set_t cpu_set;
-        CPU_ZERO(&cpu_set);
-        CPU_SET(cpu_id, &cpu_set);
-        pthread_setaffinity_np(pthread_self(), sizeof(cpu_set), &cpu_set);
-    #endif
-}
-
-
-//------------------------------------------------------------------------------
 // ThreadWorker
 
-ThreadWorker::ThreadWorker(int cpu_id_affinity)
+ThreadWorker::ThreadWorker(int worker_index, int cpu_id_affinity)
 {
+    WorkerIndex = worker_index;
     CpuIdAffinity = cpu_id_affinity;
 
     Terminated = false;
@@ -70,7 +47,7 @@ void ThreadWorker::Loop()
         }
 
         for (auto& task : todo) {
-            task();
+            task(WorkerIndex);
             if (Terminated) {
                 break;
             }
@@ -106,8 +83,10 @@ void WorkerPool::Start(int worker_count, bool use_thread_affinity)
     }
 
     int affinity = 0;
-    for (int i = 0; i < worker_count; ++i) {
-        auto worker = std::make_shared<ThreadWorker>(use_thread_affinity ? affinity : -1);
+    for (int worker_index = 0; worker_index < worker_count; ++worker_index) {
+        auto worker = std::make_shared<ThreadWorker>(
+            worker_index,
+            use_thread_affinity ? affinity : -1);
         Workers.emplace_back(std::move(worker));
 
         affinity += 2;

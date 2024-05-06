@@ -8,24 +8,25 @@
 #include <functional>
 #include <atomic>
 
-using TaskFn = std::function<void()>;
-
 
 //------------------------------------------------------------------------------
 // ThreadWorker
 
+using TaskFn = std::function<void(int worker_index)>;
+
 class ThreadWorker {
 public:
-    ThreadWorker(int cpu_id_affinity = -1);
+    ThreadWorker(int worker_index, int cpu_id_affinity = -1);
     ~ThreadWorker();
 
     void QueueTask(TaskFn task);
 
-    const int32_t GetActiveTaskCount() const { return ActiveTasks; }
+    int32_t GetActiveTaskCount() const { return ActiveTasks; }
 
     void WaitForTasks(int max_active_tasks = 0);
 
 protected:
+    int WorkerIndex = -1;
     int CpuIdAffinity = -1;
 
     std::shared_ptr<std::thread> Thread;

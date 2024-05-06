@@ -3,121 +3,140 @@
 #include <city.h>
 #include <cpppath.h>
 
+#include <iostream>
+
 
 //------------------------------------------------------------------------------
-// CompressorWorker
+// CompressorContext
 
-void CompressorWorker::Start(
-    OnFileComplete on_file_complete,
+bool CompressorContext::WriteTokenizedText(
+    const uint32_t* tokenized_text,
+    uint32_t text_length,
     OnFileStart on_file_start)
 {
-    on_file_complete_ = on_file_complete;
-    on_file_start_ = on_file_start;
-    worker_ = std::make_shared<ThreadWorker>();
-}
+    bool r = compressor.Compress(
+        tokenized_text,
+        text_length * sizeof(uint32_t),
+        4);
+    if (!r) {
+        std::cerr << "Compression failed" << std::endl;
+        return false;
+    }
 
-bool CompressorWorker::Stop()
-{
-    worker_ = nullptr;
-}
+    if (current_file_bytes_ == 0) {
+        on_file_start(data_file_path_, index_file_path_);
 
-bool CompressorWorker::WriteTokenizedText(
-    const uint32_t* tokenized_text,
-    uint32_t text_length)
-{
+        current_index_.open(index_file_path_, std::ios::binary);
+        current_file_.open(data_file_path_, std::ios::binary);
+        if (!current_index_ || !current_file_) {
+            std::cerr << "Failed to open files: " << index_file_path_ << ", " << data_file_path_ << std::endl;
+            return false;
+        }
+    }
 
+    // Write the offset of the current chunk to the index file
+    uint32_t current_offset = static_cast<uint32_t>(current_file_bytes_);
+    current_index_.write(reinterpret_cast<const char*>(&current_offset), sizeof(current_offset));
+    current_index_hash_ ^= CityHash64(reinterpret_cast<const char*>(&current_offset), sizeof(current_offset));
+
+    // Write the compressed data to the current file
+    current_file_.write(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size());
+    current_file_bytes_ += compressor.Result.size();
+    current_file_hash_ ^= CityHash64(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size());
+
+    if (current_file_.fail() || current_index_.fail()) {
+        std::cerr << "Failed to write to files" << std::endl;
+        return false;
+    }
+
+    if (current_file_bytes_ >= kMaxFileSize) {
+        // Last 64 bits is the file hash for verification
+        current_file_.write(reinterpret_cast<const char*>(&current_file_hash_), sizeof(current_file_hash_));
+        current_index_.write(reinterpret_cast<const char*>(&current_index_hash_), sizeof(current_index_hash_));
+
+        if (current_file_.fail() || current_index_.fail()) {
+            std::cerr << "Failed to write tail on files" << std::endl;
+            return false;
+        }
+
+        current_file_.close();
+        current_index_.close();
+        current_file_hash_ = 0;
+        current_index_hash_ = 0;
+        current_file_bytes_ = 0;
+    }
+
+    return true;
 }
 
 
 //------------------------------------------------------------------------------
 // TokenizedDataPrep
 
-TokenizedDataPrep::TokenizedDataPrep(const std::string& data_folder_path)
-    : data_folder_path_(data_folder_path) {}
+void TokenizedDataPrep::Start(const std::string& data_folder_path)
+{
+    data_folder_path_ = data_folder_path;
+
+    current_file_number_ = 0;
+    worker_error_ = false;
+
+    pool_.Start();
+    contexts_.resize(pool_.GetWorkerCount());
+    for (int i = 0; i < (int)contexts_.size(); ++i) {
+        contexts_[i] = std::make_shared<CompressorContext>();
+    }
+}
 
 bool TokenizedDataPrep::WriteTokenizedText(
     const uint32_t* tokenized_text,
     uint32_t text_length)
 {
-    if (current_file_size_ >= kMaxFileSize) {
-        if (!Finalize()) {
-            return false;
-        }
-    }
-#if 0
-    // Split high and low bytes of the tokens
-    packed_buffer_.resize(text_length * sizeof(uint16_t));
-    uint8_t* low_buffer = packed_buffer_.data();
-    uint8_t* high_buffer = packed_buffer_.data() + text_length;
-    for (uint32_t i = 0; i < text_length; ++i) {
-        low_buffer[i] = static_cast<uint8_t>( tokenized_text[i] );
-        high_buffer[i] = static_cast<uint8_t>( tokenized_text[i] >> 8 );
-    }
+    // Do not allow workers to run ahead more than N tasks at a time
+    const int max_active_tasks = 4;
 
-    if (!compressor.Compress(packed_buffer_.data(), text_length * sizeof(uint16_t))) {
-        return false;
-    }
-
-    if (current_file_size_ == 0) {
-        std::string index_file_name = "index_" + std::to_string(current_file_number_) + ".bin";
-        std::string index_file_path = cpppath::join({data_folder_path_, index_file_name});
-
-        current_index_.open(index_file_path, std::ios::binary);
-        if (!current_index_) {
-            return false;
-        }
+    OnFileStart on_file_start = [this](std::string& data_file_path, std::string& index_file_path) {
+        std::lock_guard<std::mutex> lock(global_index_mutex_);
 
         std::string data_file_name = "data_" + std::to_string(current_file_number_) + ".bin";
-        std::string data_file_path = cpppath::join({data_folder_path_, data_file_name});
+        data_file_path = cpppath::join({data_folder_path_, data_file_name});
+        global_index_["data_files"].PushBack() = data_file_path;
 
-        current_file_.open(data_file_path, std::ios::binary);
-        if (!current_file_) {
-            return false;
+        std::string index_file_name = "index_" + std::to_string(current_file_number_) + ".bin";
+        index_file_path = cpppath::join({data_folder_path_, index_file_name});
+        global_index_["index_files"].PushBack() = index_file_path;
+
+        current_file_number_++;
+    };
+
+    std::shared_ptr<TokenizedBuffer> buffer = allocator_.Allocate(tokenized_text, text_length);
+    pool_.QueueTask([this, on_file_start, buffer](int worker_index) {
+        bool r = contexts_[worker_index]->WriteTokenizedText(
+            buffer->text.data(),
+            buffer->text.size(),
+            on_file_start);
+        if (!r) {
+            std::cerr << "Worker encountered an error" << std::endl;
+            worker_error_ = true;
         }
-    }
+        allocator_.Free(buffer);
+    }, max_active_tasks);
 
-    // Write the offset of the current chunk to the index file
-    uint32_t current_offset = static_cast<uint32_t>( current_file_size_ );
-    current_index_.write(reinterpret_cast<const char*>(&current_offset), sizeof(current_offset));
-
-    current_index_hash_ ^= CityHash64(reinterpret_cast<const char*>(&current_offset), sizeof(current_offset));
-
-    // Write the compressed data to the current file
-    current_file_.write(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size());
-    current_file_size_ += compressor.Result.size();
-
-    current_file_hash_ ^= CityHash64(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size());
-
-    if (current_file_.fail() || current_index_.fail()) {
-        return false;
-    }
-#endif
-    return true;
+    return !worker_error_;
 }
 
 bool TokenizedDataPrep::Finalize() {
-    if (current_file_size_ <= 0) {
-        return true;
+    // Wait for all tasks to complete before finalizing the index file
+    pool_.WaitForTasks();
+
+    std::string index_file_name = "index.yaml";
+    std::string index_file_path = cpppath::join({data_folder_path_, index_file_name});
+
+    try {
+        Yaml::Serialize(global_index_, index_file_path);
+    } catch (const Yaml::Exception& e) {
+        std::cerr << "Failed to serialize index file: " << e.what() << std::endl;
+        return false;
     }
 
-#if 0
-    // Last 64 bits is the file hash for verification
-    current_file_.write(reinterpret_cast<const char*>(&current_file_hash_), sizeof(current_file_hash_));
-    current_index_.write(reinterpret_cast<const char*>(&current_index_hash_), sizeof(current_index_hash_));
-
-    bool success = true;
-    if (current_file_.fail() || current_index_.fail()) {
-        success = false;
-    }
-
-    current_file_.close();
-    current_index_.close();
-    current_file_hash_ = 0;
-    current_index_hash_ = 0;
-
-    current_file_number_++;
-    current_file_size_ = 0;
-    return success;
-#endif
     return true;
 }

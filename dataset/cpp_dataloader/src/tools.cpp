@@ -3,6 +3,12 @@
 #include <cstring>
 #include <chrono>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
+
 
 //------------------------------------------------------------------------------
 // TokenizedAllocator
@@ -39,6 +45,7 @@ void TokenizedAllocator::Free(std::shared_ptr<TokenizedBuffer> buffer)
     free_buffers_count_++;
 }
 
+
 //------------------------------------------------------------------------------
 // Tools
 
@@ -60,4 +67,18 @@ int64_t GetNsec()
     struct timespec tp;
     clock_gettime(CLOCK_REALTIME, &tp);
     return static_cast<int64_t>(tp.tv_sec) * 1000000000LL + tp.tv_nsec;
+}
+
+void set_thread_affinity(int cpu_id) {
+    // Set thread affinity
+    #ifdef _WIN32
+        HANDLE thread_handle = GetCurrentThread();
+        DWORD_PTR thread_affinity_mask = 1LL << cpu_id;
+        SetThreadAffinityMask(thread_handle, thread_affinity_mask);
+    #else
+        cpu_set_t cpu_set;
+        CPU_ZERO(&cpu_set);
+        CPU_SET(cpu_id, &cpu_set);
+        pthread_setaffinity_np(pthread_self(), sizeof(cpu_set), &cpu_set);
+    #endif
 }

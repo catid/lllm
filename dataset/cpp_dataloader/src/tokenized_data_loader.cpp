@@ -123,7 +123,7 @@ bool data_verify(const char* data_folder_path)
     const int num_workers = pool.GetWorkerCount();
 
     for (int i = 0; i < num_workers; ++i) {
-        pool.QueueTask([&]() {
+        pool.QueueTask([&](int worker_index) {
             // FIXME
         });
     }
