@@ -56,7 +56,7 @@ add_library(${PROJECT_NAME} SHARED
 target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_include_directories(${PROJECT_NAME} PRIVATE
+target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/yaml
     ${CMAKE_CURRENT_SOURCE_DIR}/cityhash
     ${CMAKE_CURRENT_SOURCE_DIR}/cpppath
@@ -84,3 +84,7 @@ target_link_libraries(test_worker_pool ${PROJECT_NAME})
 # Test executable test_tools
 add_executable(test_tools tests/test_tools.cpp)
 target_link_libraries(test_tools ${PROJECT_NAME})
+
+# Test executable test_data_prep
+add_executable(test_data_prep tests/test_data_prep.cpp)
+target_link_libraries(test_data_prep ${PROJECT_NAME})

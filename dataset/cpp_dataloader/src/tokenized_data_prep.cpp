@@ -124,7 +124,7 @@ bool TokenizedDataPrep::WriteTokenizedText(
     return !worker_error_;
 }
 
-bool TokenizedDataPrep::Finalize() {
+bool TokenizedDataPrep::Stop() {
     // Wait for all tasks to complete before finalizing the index file
     pool_.WaitForTasks();
 

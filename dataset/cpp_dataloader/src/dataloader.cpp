@@ -72,7 +72,7 @@ bool data_prep_write_tokenized_text(
 
 void data_prep_finalize(void* data_prep) {
     TokenizedDataPrep* prep = static_cast<TokenizedDataPrep*>(data_prep);
-    prep->Finalize();
+    prep->Stop();
 }
 
 

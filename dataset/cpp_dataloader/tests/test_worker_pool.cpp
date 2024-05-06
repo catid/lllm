@@ -8,7 +8,7 @@ bool TestSingleTask() {
     pool.Start(4, false);
 
     bool task_completed = false;
-    pool.QueueTask([&](int worker_index) {
+    pool.QueueTask([&](int /*worker_index*/) {
         task_completed = true;
     });
 
@@ -32,7 +32,7 @@ bool TestMultipleTasks() {
 
     const int num_tasks = 100000 * pool.GetWorkerCount();
     for (int i = 0; i < num_tasks; ++i) {
-        pool.QueueTask([&, i](int worker_index) {
+        pool.QueueTask([&, i](int /*worker_index*/) {
             std::lock_guard<std::mutex> lock(results_mutex);
             results.push_back(i);
         });
@@ -41,7 +41,7 @@ bool TestMultipleTasks() {
     pool.WaitForTasks();
     pool.Stop();
 
-    if (results.size() != num_tasks) {
+    if ((int)results.size() != num_tasks) {
         std::cout << "TestMultipleTasks failed" << std::endl;
         return false;
     }
