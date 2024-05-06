@@ -30,7 +30,7 @@ bool TestMultipleTasks() {
     std::vector<int> results;
     std::mutex results_mutex;
 
-    const int num_tasks = 10000000;
+    const int num_tasks = 100000 * pool.GetWorkerCount();
     for (int i = 0; i < num_tasks; ++i) {
         pool.QueueTask([&, i]() {
             std::lock_guard<std::mutex> lock(results_mutex);
