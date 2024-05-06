@@ -80,3 +80,7 @@ target_link_libraries(test_mapped_file ${PROJECT_NAME})
 # Test executable test_worker_pool
 add_executable(test_worker_pool tests/test_worker_pool.cpp)
 target_link_libraries(test_worker_pool ${PROJECT_NAME})
+
+# Test executable test_tools
+add_executable(test_tools tests/test_tools.cpp)
+target_link_libraries(test_tools ${PROJECT_NAME})
