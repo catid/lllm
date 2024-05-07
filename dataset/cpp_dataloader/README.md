@@ -11,7 +11,7 @@ python setup.py install
 ## Thanks
 
 Third party libraries used:
-* `mini-yaml` from https://github.com/jimmiebergmann/mini-yaml
+* `rapidyaml` from https://github.com/biojppm/rapidyaml
 * `cpppath` from https://github.com/tdegeus/cpppath
 * `cityhash` from https://github.com/google/cityhash
 * `zstd` from https://github.com/facebook/zstd
