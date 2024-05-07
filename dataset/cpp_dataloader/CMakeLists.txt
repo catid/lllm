@@ -47,8 +47,8 @@ add_library(${PROJECT_NAME} SHARED
     ${DATALOADER_SRC_FILES}
     cityhash/city.cc
     cityhash/city.h
-    yaml/yaml.cpp
-    yaml/yaml.hpp
+    ryml/ryml.cpp
+    ryml/ryml.hpp
     cpppath/cpppath.h
     ${ZSTD_SRC_FILES}
     ${ZSTD_HEADER_FILES}
@@ -57,7 +57,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/yaml
+    ${CMAKE_CURRENT_SOURCE_DIR}/ryml
     ${CMAKE_CURRENT_SOURCE_DIR}/cityhash
     ${CMAKE_CURRENT_SOURCE_DIR}/cpppath
     ${CMAKE_CURRENT_SOURCE_DIR}/worker_pool

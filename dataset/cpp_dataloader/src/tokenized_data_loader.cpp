@@ -5,7 +5,7 @@
 #include <iostream>
 
 #include <cpppath.h>
-#include <yaml.hpp>
+#include <ryml.hpp>
 
 
 //------------------------------------------------------------------------------
@@ -99,7 +99,7 @@ bool TokenizedDataLoader::GetTokenArray(
 bool data_verify(const char* data_folder_path)
 {
     std::string index_file_path = cpppath::join({data_folder_path, DATALOADER_MAIN_INDEX_FILE});
-
+#if 0
     Yaml::Node root;
 
     try {
@@ -116,7 +116,7 @@ bool data_verify(const char* data_folder_path)
         std::cerr << "Error parsing index file: " << e.what() << std::endl;
         return false;
     }
-
+#endif
     WorkerPool pool;
     pool.Start();
 

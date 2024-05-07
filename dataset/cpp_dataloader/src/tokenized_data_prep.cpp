@@ -79,6 +79,7 @@ void TokenizedDataPrep::Start(const std::string& data_folder_path)
 
     current_file_number_ = 0;
     worker_error_ = false;
+    stopped_ = false;
 
     pool_.Start();
     contexts_.resize(pool_.GetWorkerCount());
@@ -99,11 +100,11 @@ bool TokenizedDataPrep::WriteTokenizedText(
 
         std::string data_file_name = "data_" + std::to_string(current_file_number_) + ".bin";
         data_file_path = cpppath::join({data_folder_path_, data_file_name});
-        global_index_["data_files"].PushBack() = data_file_path;
+        data_files_.push_back(data_file_name);
 
         std::string index_file_name = "index_" + std::to_string(current_file_number_) + ".bin";
         index_file_path = cpppath::join({data_folder_path_, index_file_name});
-        global_index_["index_files"].PushBack() = index_file_path;
+        index_files_.push_back(index_file_name);
 
         current_file_number_++;
     };
@@ -125,17 +126,31 @@ bool TokenizedDataPrep::WriteTokenizedText(
 }
 
 bool TokenizedDataPrep::Stop() {
+    if (stopped_) {
+        return true;
+    }
+    stopped_ = true;
+
     // Wait for all tasks to complete before finalizing the index file
     pool_.WaitForTasks();
 
     std::string index_file_name = "index.yaml";
     std::string index_file_path = cpppath::join({data_folder_path_, index_file_name});
 
-    try {
-        Yaml::Serialize(global_index_, index_file_path);
-    } catch (const Yaml::Exception& e) {
-        std::cerr << "Failed to serialize index file: " << e.what() << std::endl;
+    std::ofstream global_index_file(index_file_path);
+    if (!global_index_file.is_open()) {
+        std::cerr << "Failed to open index file: " << index_file_path << std::endl;
         return false;
+    }
+
+    global_index_file << "data_files:" << std::endl;
+    for(auto it = data_files_.begin(); it != data_files_.end(); it++) {
+        global_index_file << "  - " << *it << std::endl;
+    }
+
+    global_index_file << "index_files:" << std::endl;
+    for(auto it = index_files_.begin(); it != index_files_.end(); it++) {
+        global_index_file << "  - " << *it << std::endl;
     }
 
     return true;

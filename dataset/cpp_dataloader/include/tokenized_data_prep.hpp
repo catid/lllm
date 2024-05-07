@@ -12,8 +12,6 @@
 #include "compressor.hpp"
 #include "tools.hpp"
 
-#include <yaml.hpp>
-
 //------------------------------------------------------------------------------
 // Constants
 
@@ -68,5 +66,8 @@ private:
     std::atomic<bool> worker_error_ = ATOMIC_VAR_INIT(false);
 
     std::mutex global_index_mutex_;
-    Yaml::Node global_index_;
+    std::vector<std::string> index_files_;
+    std::vector<std::string> data_files_;
+
+    bool stopped_ = false;
 };
