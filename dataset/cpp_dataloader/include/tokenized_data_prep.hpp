@@ -30,6 +30,8 @@ public:
         uint32_t text_length,
         OnFileStart on_file_start);
 
+    bool FinishCurrentFile();
+
 protected:
     std::string data_file_path_;
     std::ofstream current_file_;
@@ -41,8 +43,6 @@ protected:
     uint64_t current_file_bytes_ = 0;
 
     Compressor compressor;
-
-    void ProcessBuffer(std::shared_ptr<TokenizedBuffer> buffer);
 };
 
 

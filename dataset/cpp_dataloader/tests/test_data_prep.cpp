@@ -1,5 +1,11 @@
 #include <tokenized_data_prep.hpp>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#endif
+
 #include <iostream>
 #include <cstdint>
 #include <cstring>
@@ -64,12 +70,38 @@ bool testTokenizedDataPrep() {
     return true;
 }
 
+bool create_directory(const std::string& directory_path) {
+#ifdef _WIN32
+    if (CreateDirectory(directory_path.c_str(), NULL) != 0) {
+        return true;
+    }
+    else if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        return true;
+    }
+#else
+    if (mkdir(directory_path.c_str(), 0777) == 0) {
+        return true;
+    }
+    else if (errno == EEXIST) {
+        return true;
+    }
+#endif
+    return false;
+}
+
 int main() {
+    const std::string directory_path = "test_data";
+
+    if (!create_directory(directory_path)) {
+        std::cout << "Failed to create test directory" << std::endl;
+        return -1;
+    }
+
     if (testTokenizedDataPrep()) {
         std::cout << "TokenizedDataPrep test passed" << std::endl;
         return 0;
     } else {
         std::cout << "TokenizedDataPrep test failed" << std::endl;
-        return 1;
+        return -1;
     }
 }

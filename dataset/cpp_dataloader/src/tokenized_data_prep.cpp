@@ -35,9 +35,10 @@ bool CompressorContext::WriteTokenizedText(
     }
 
     // Write the offset of the current chunk to the index file
-    uint32_t current_offset = static_cast<uint32_t>(current_file_bytes_);
-    current_index_.write(reinterpret_cast<const char*>(&current_offset), sizeof(current_offset));
-    current_index_hash_ ^= CityHash64(reinterpret_cast<const char*>(&current_offset), sizeof(current_offset));
+    char current_offset_buffer[4];
+    write_uint32_le(current_offset_buffer, current_file_bytes_);
+    current_index_.write(current_offset_buffer, sizeof(current_offset_buffer));
+    current_index_hash_ ^= CityHash64(current_offset_buffer, sizeof(current_offset_buffer));
 
     // Write the compressed data to the current file
     current_file_.write(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size());
@@ -50,22 +51,32 @@ bool CompressorContext::WriteTokenizedText(
     }
 
     if (current_file_bytes_ >= kMaxFileSize) {
-        // Last 64 bits is the file hash for verification
-        current_file_.write(reinterpret_cast<const char*>(&current_file_hash_), sizeof(current_file_hash_));
-        current_index_.write(reinterpret_cast<const char*>(&current_index_hash_), sizeof(current_index_hash_));
-
-        if (current_file_.fail() || current_index_.fail()) {
-            std::cerr << "Failed to write tail on files" << std::endl;
+        if (!FinishCurrentFile()) {
             return false;
         }
-
-        current_file_.close();
-        current_index_.close();
-        current_file_hash_ = 0;
-        current_index_hash_ = 0;
-        current_file_bytes_ = 0;
     }
 
+    return true;
+}
+
+bool CompressorContext::FinishCurrentFile()
+{
+    char file_hash_buffer[8], index_hash_buffer[8];
+    write_uint64_le(file_hash_buffer, current_file_hash_);
+    write_uint64_le(index_hash_buffer, current_index_hash_);
+    current_file_.write(file_hash_buffer, sizeof(file_hash_buffer));
+    current_index_.write(index_hash_buffer, sizeof(index_hash_buffer));
+
+    if (current_file_.fail() || current_index_.fail()) {
+        std::cerr << "Failed to write tail on files" << std::endl;
+        return false;
+    }
+
+    current_file_.close();
+    current_index_.close();
+    current_file_hash_ = 0;
+    current_index_hash_ = 0;
+    current_file_bytes_ = 0;
     return true;
 }
 
@@ -133,6 +144,12 @@ bool TokenizedDataPrep::Stop() {
 
     // Wait for all tasks to complete before finalizing the index file
     pool_.WaitForTasks();
+
+    for (int i = 0; i < (int)contexts_.size(); ++i) {
+        if (contexts_[i] && !contexts_[i]->FinishCurrentFile()) {
+            return false;
+        }
+    }
 
     std::string index_file_name = "index.yaml";
     std::string index_file_path = cpppath::join({data_folder_path_, index_file_name});

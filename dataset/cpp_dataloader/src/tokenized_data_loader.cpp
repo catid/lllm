@@ -1,4 +1,5 @@
 #include "tokenized_data_loader.hpp"
+#include "tools.hpp"
 
 #include <algorithm>
 #include <random>
@@ -7,6 +8,7 @@
 #include <cpppath.h>
 #include <ryml.hpp>
 #include <mapped_file.hpp>
+#include <city.h>
 
 
 //------------------------------------------------------------------------------
@@ -99,7 +101,31 @@ bool TokenizedDataLoader::GetTokenArray(
 
 bool verify_index(const std::string& index_file_path)
 {
+    MappedFileReader index_reader;
+    if (!index_reader.Open(index_file_path)) {
+        return false;
+    }
 
+    const char* index_data = reinterpret_cast<const char*>(index_reader.GetData());
+    size_t index_size = index_reader.GetSize();
+
+    uint64_t hash = read_uint64_le(index_data + index_size - 8);
+    size_t word_count = (index_size - 8) / sizeof(uint32_t);
+
+    for (size_t i = 0; i < word_count; ++i) {
+        const char* current_offset_buffer = index_data + i * sizeof(uint32_t);
+        uint32_t current_offset = read_uint32_le(current_offset_buffer);
+        std::cout << "current offset: " << current_offset << std::endl;
+
+        hash ^= CityHash64(current_offset_buffer, sizeof(current_offset));
+    }
+
+    if (hash != 0) {
+        std::cout << "Index file is corrupted: " << index_file_path << std::endl;
+        return false;
+    }
+
+    return true;
 }
 
 bool data_verify(const std::string& data_folder_path)
@@ -124,6 +150,8 @@ bool data_verify(const std::string& data_folder_path)
     WorkerPool pool;
     pool.Start();
 
+    std::atomic<bool> data_error(false);
+
     for (size_t i = 0; i < data_files.num_children(); ++i) {
         std::string data_file, index_file;
         ryml::from_chars(data_files[i].val(), &data_file);
@@ -135,9 +163,25 @@ bool data_verify(const std::string& data_folder_path)
         std::cout << "verifying data: " << data_file_path << ", " << index_file_path << std::endl;
 
         const int max_active_tasks = 2;
-        pool.QueueTask([data_file_path, index_file_path](int worker_index) {
-            verify_index
+        pool.QueueTask([&data_error, data_file_path, index_file_path](int worker_index) {
+            if (!verify_index(index_file_path)) {
+                data_error = true;
+            }
             
         }, max_active_tasks);
+
+        if (data_error) {
+            break;
+        }
     }
+
+    pool.WaitForTasks();
+    pool.Stop();
+
+    if (data_error) {
+        std::cout << "Data verification failed" << std::endl;
+        return false;
+    }
+
+    return true;
 }
