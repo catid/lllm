@@ -1,3 +1,5 @@
+#include <tokenized_data_prep.hpp>
+
 #include <iostream>
 #include <cstdint>
 #include <cstring>
@@ -5,8 +7,6 @@
 #include <string>
 #include <vector>
 #include <fstream>
-
-#include <tokenized_data_prep.hpp>
 
 bool testTokenizedDataPrep() {
     std::string data_folder_path = "test_data";

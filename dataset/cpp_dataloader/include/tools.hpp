@@ -27,6 +27,7 @@ protected:
     std::atomic<uint32_t> free_buffers_count_ = ATOMIC_VAR_INIT(0);
 };
 
+
 //------------------------------------------------------------------------------
 // Tools
 

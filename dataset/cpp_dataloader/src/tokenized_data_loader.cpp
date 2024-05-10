@@ -6,6 +6,7 @@
 
 #include <cpppath.h>
 #include <ryml.hpp>
+#include <mapped_file.hpp>
 
 
 //------------------------------------------------------------------------------
@@ -96,35 +97,47 @@ bool TokenizedDataLoader::GetTokenArray(
 //------------------------------------------------------------------------------
 // Verify
 
-bool data_verify(const char* data_folder_path)
+bool verify_index(const std::string& index_file_path)
+{
+
+}
+
+bool data_verify(const std::string& data_folder_path)
 {
     std::string index_file_path = cpppath::join({data_folder_path, DATALOADER_MAIN_INDEX_FILE});
-#if 0
-    Yaml::Node root;
 
-    try {
-        Yaml::Parse(root, index_file_path);
-
-        Yaml::Node data_items = root["data_files"];
-
-        for(auto it = data_items.Begin(); it != data_items.End(); it++)
-        {
-            std::cout << (*it).first << ": " << (*it).second.As<std::string>() << std::endl;
-        }
-
-    } catch (Yaml::Exception& e) {
-        std::cerr << "Error parsing index file: " << e.what() << std::endl;
+    MappedFileReader index_reader;
+    if (!index_reader.Open(index_file_path)) {
         return false;
     }
-#endif
+
+    ryml::csubstr yaml_substr((const char*)index_reader.GetData(), index_reader.GetSize());
+    ryml::Tree tree = ryml::parse(yaml_substr);
+    ryml::ConstNodeRef data_files = tree["data_files"];
+    ryml::ConstNodeRef index_files = tree["index_files"];
+    if (data_files.invalid() || index_files.invalid() ||
+        !data_files.is_seq() || !index_files.is_seq() ||
+        data_files.num_children() != index_files.num_children()) {
+        return false;
+    }
+
     WorkerPool pool;
     pool.Start();
 
-    const int num_workers = pool.GetWorkerCount();
+    for (size_t i = 0; i < data_files.num_children(); ++i) {
+        std::string data_file, index_file;
+        ryml::from_chars(data_files[i].val(), &data_file);
+        ryml::from_chars(index_files[i].val(), &index_file);
 
-    for (int i = 0; i < num_workers; ++i) {
-        pool.QueueTask([&](int worker_index) {
-            // FIXME
-        });
+        std::string data_file_path = cpppath::join({data_folder_path, data_file});
+        std::string index_file_path = cpppath::join({data_folder_path, index_file});
+
+        std::cout << "verifying data: " << data_file_path << ", " << index_file_path << std::endl;
+
+        const int max_active_tasks = 2;
+        pool.QueueTask([data_file_path, index_file_path](int worker_index) {
+            verify_index
+            
+        }, max_active_tasks);
     }
 }

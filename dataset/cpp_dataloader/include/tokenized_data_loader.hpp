@@ -42,4 +42,4 @@ private:
 //------------------------------------------------------------------------------
 // Verify
 
-bool data_verify(const char* data_folder_path);
+bool data_verify(const std::string& data_folder_path);

@@ -88,3 +88,7 @@ target_link_libraries(test_tools ${PROJECT_NAME})
 # Test executable test_data_prep
 add_executable(test_data_prep tests/test_data_prep.cpp)
 target_link_libraries(test_data_prep ${PROJECT_NAME})
+
+# Test executable test_data_loader
+add_executable(test_data_loader tests/test_data_loader.cpp)
+target_link_libraries(test_data_loader ${PROJECT_NAME})
