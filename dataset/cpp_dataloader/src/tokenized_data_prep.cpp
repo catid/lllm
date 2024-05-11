@@ -61,6 +61,11 @@ bool CompressorContext::WriteTokenizedText(
 
 bool CompressorContext::FinishCurrentFile()
 {
+    char current_offset_buffer[4];
+    write_uint32_le(current_offset_buffer, current_file_bytes_);
+    current_index_.write(current_offset_buffer, sizeof(current_offset_buffer));
+    current_index_hash_ ^= CityHash64(current_offset_buffer, sizeof(current_offset_buffer));
+
     char file_hash_buffer[8], index_hash_buffer[8];
     write_uint64_le(file_hash_buffer, current_file_hash_);
     write_uint64_le(index_hash_buffer, current_index_hash_);

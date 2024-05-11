@@ -99,29 +99,54 @@ bool TokenizedDataLoader::GetTokenArray(
 //------------------------------------------------------------------------------
 // Verify
 
-bool verify_index(const std::string& index_file_path)
+bool verify_files(
+    const std::string& index_file_path,
+    const std::string& data_file_path)
 {
     MappedFileReader index_reader;
     if (!index_reader.Open(index_file_path)) {
+        std::cout << "Failed to open index file: " << index_file_path << std::endl;
         return false;
     }
 
     const char* index_data = reinterpret_cast<const char*>(index_reader.GetData());
     size_t index_size = index_reader.GetSize();
-
-    uint64_t hash = read_uint64_le(index_data + index_size - 8);
+    uint64_t index_hash = read_uint64_le(index_data + index_size - 8);
+    index_hash ^= CityHash64(index_data, sizeof(uint32_t));
     size_t word_count = (index_size - 8) / sizeof(uint32_t);
 
-    for (size_t i = 0; i < word_count; ++i) {
-        const char* current_offset_buffer = index_data + i * sizeof(uint32_t);
-        uint32_t current_offset = read_uint32_le(current_offset_buffer);
-        std::cout << "current offset: " << current_offset << std::endl;
-
-        hash ^= CityHash64(current_offset_buffer, sizeof(current_offset));
+    MappedFileReader data_reader;
+    if (!data_reader.Open(data_file_path)) {
+        std::cout << "Failed to open data file: " << data_file_path << std::endl;
+        return false;
     }
 
-    if (hash != 0) {
+    const char* data_data = reinterpret_cast<const char*>(data_reader.GetData());
+    size_t data_size = data_reader.GetSize();
+    uint64_t data_hash = read_uint64_le(data_data + data_size - 8);
+
+    for (size_t i = 1; i < word_count; ++i) {
+        const char* current_offset_buffer = index_data + i * sizeof(uint32_t);
+        uint32_t start = read_uint32_le(current_offset_buffer - 4);
+        uint32_t end = read_uint32_le(current_offset_buffer);
+        if (end <= start) {
+            std::cout << "Invalid offset: " << current_offset_buffer << std::endl;
+            return false;
+        }
+        uint32_t bytes = end - start;
+
+        index_hash ^= CityHash64(current_offset_buffer, sizeof(uint32_t));
+
+        data_hash ^= CityHash64(data_data + start, bytes);
+    }
+
+    if (index_hash != 0) {
         std::cout << "Index file is corrupted: " << index_file_path << std::endl;
+        return false;
+    }
+
+    if (data_hash != 0) {
+        std::cout << "Data file is corrupted: " << data_file_path << std::endl;
         return false;
     }
 
@@ -151,8 +176,10 @@ bool data_verify(const std::string& data_folder_path)
     pool.Start();
 
     std::atomic<bool> data_error(false);
+    std::atomic<int> files_verified(0);
+    const int num_files = (int)data_files.num_children();
 
-    for (size_t i = 0; i < data_files.num_children(); ++i) {
+    for (int i = 0; i < num_files; ++i) {
         std::string data_file, index_file;
         ryml::from_chars(data_files[i].val(), &data_file);
         ryml::from_chars(index_files[i].val(), &index_file);
@@ -160,14 +187,18 @@ bool data_verify(const std::string& data_folder_path)
         std::string data_file_path = cpppath::join({data_folder_path, data_file});
         std::string index_file_path = cpppath::join({data_folder_path, index_file});
 
-        std::cout << "verifying data: " << data_file_path << ", " << index_file_path << std::endl;
-
         const int max_active_tasks = 2;
-        pool.QueueTask([&data_error, data_file_path, index_file_path](int worker_index) {
-            if (!verify_index(index_file_path)) {
+        pool.QueueTask([&files_verified, num_files, &data_error, data_file_path, index_file_path](int worker_index) {
+            if (data_error) {
+                return;
+            }
+            if (!verify_files(index_file_path, data_file_path)) {
                 data_error = true;
             }
-            
+            const int count = files_verified++;
+            if (count % 10 == 0) {
+                std::cout << "verified " << count << "/" << num_files << std::endl;
+            }
         }, max_active_tasks);
 
         if (data_error) {

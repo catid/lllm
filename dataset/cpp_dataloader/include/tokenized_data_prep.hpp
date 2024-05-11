@@ -15,7 +15,8 @@
 //------------------------------------------------------------------------------
 // Constants
 
-static const uint64_t kMaxFileSize = 4ULL * 1024 * 1024 * 1024;
+// Limit size so that it is unlikely we will go over a 32-bit address space
+static const uint64_t kMaxFileSize = 0xffffffff - 1000000;
 
 
 //------------------------------------------------------------------------------
