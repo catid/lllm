@@ -117,11 +117,13 @@ uint64_t TokenizedDataLoader::StartEpoch(uint64_t seed0, uint64_t seed1, uint32_
     std::mt19937 rng(seed);
     std::shuffle(microbatch_indices_.begin(), microbatch_indices_.end(), rng);
 
+#if 0
     for (uint32_t i = 0; i < micro_batch_size * 2; ++i) {
         pool_.QueueTask([this](int worker_index) {
-            
+
         },
     }
+#endif
 
     return total_num_regions_;
 }
@@ -140,6 +142,7 @@ bool TokenizedDataLoader::GetTokenArray(
     uint64_t shuffled_index = microbatch_indices_[microbatch_index];
     uint64_t offset = shuffled_index * micro_batch_size_ * context_size_ * sizeof(uint16_t);
 
+#if 0
     auto it = std::upper_bound(data_file_offsets_.begin(), data_file_offsets_.end(), offset);
     size_t file_index = std::distance(data_file_offsets_.begin(), it) - 1;
 
@@ -160,7 +163,7 @@ bool TokenizedDataLoader::GetTokenArray(
 
     *micro_batch_size = micro_batch_size_;
     *num_tokens = num_elements;
-
+#endif
     return true;
 }
 

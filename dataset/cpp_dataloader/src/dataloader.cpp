@@ -8,7 +8,7 @@ extern "C" {
 
 void* data_loader_create(const char* index_file) {
     TokenizedDataLoader* loader = new TokenizedDataLoader();
-    if (!loader->Load(index_file)) {
+    if (!loader->Start(index_file)) {
         delete loader;
         return nullptr;
     }
@@ -16,7 +16,12 @@ void* data_loader_create(const char* index_file) {
 }
 
 void data_loader_destroy(void* data_loader) {
-    delete static_cast<TokenizedDataLoader*>(data_loader);
+    TokenizedDataLoader* loader = static_cast<TokenizedDataLoader*>(data_loader);
+    if (!loader) {
+        return;
+    }
+    loader->Stop();
+    delete loader;
 }
 
 uint64_t data_loader_start_epoch(
