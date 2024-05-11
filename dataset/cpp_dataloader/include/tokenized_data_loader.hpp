@@ -11,11 +11,21 @@
 
 
 //------------------------------------------------------------------------------
+// GlobalIndexYaml
+
+struct GlobalIndexYaml {
+    bool Read(const std::string& data_folder_path);
+
+    std::vector<std::string> data_files_, index_files_;
+};
+
+
+//------------------------------------------------------------------------------
 // TokenizedDataLoader
 
 class TokenizedDataLoader {
 public:
-    bool Load(const std::string& index_file);
+    bool Load(const std::string& data_folder_path);
 
     uint64_t StartEpoch(
         uint64_t seed0,
@@ -31,9 +41,12 @@ public:
         uint32_t* output_array);
 
 private:
-    std::vector<MappedFileReader> data_files_;
-    std::vector<uint64_t> data_file_offsets_;
-    std::vector<uint64_t> microbatch_indices_;
+    GlobalIndexYaml global_index_yaml_;
+    std::vector<uint64_t> num_regions_;
+    uint64_t total_num_regions_ = 0;
+
+    std::vector<std::shared_ptr<MappedFileReader>> index_files_;
+
     uint32_t micro_batch_size_ = 0;
     uint32_t context_size_ = 0;
 };

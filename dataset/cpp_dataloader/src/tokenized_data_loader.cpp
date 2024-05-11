@@ -12,32 +12,80 @@
 
 
 //------------------------------------------------------------------------------
-// TokenizedDataLoader
+// GlobalIndexYaml
 
-bool TokenizedDataLoader::Load(const std::string& index_file) {
+bool GlobalIndexYaml::Read(const std::string& data_folder_path) {
+    std::string index_file_path = cpppath::join({data_folder_path, DATALOADER_MAIN_INDEX_FILE});
+
     MappedFileReader index_reader;
-    if (!index_reader.Open(index_file)) {
+    if (!index_reader.Open(index_file_path)) {
         return false;
     }
 
-    const uint8_t* index_data = index_reader.GetData();
-    size_t index_size = index_reader.GetSize();
+    ryml::csubstr yaml_substr((const char*)index_reader.GetData(), index_reader.GetSize());
+    ryml::Tree tree = ryml::parse(yaml_substr);
+    ryml::ConstNodeRef data_files = tree["data_files"];
+    ryml::ConstNodeRef index_files = tree["index_files"];
+    if (data_files.invalid() || index_files.invalid() ||
+        !data_files.is_seq() || !index_files.is_seq() ||
+        data_files.num_children() != index_files.num_children()) {
+        return false;
+    }
 
-    size_t num_data_files = index_size / sizeof(uint64_t);
-    const uint64_t* data_file_offsets = reinterpret_cast<const uint64_t*>(index_data);
+    const int num_files = (int)data_files.num_children();
+    for (int i = 0; i < num_files; ++i) {
+        std::string data_file, index_file;
+        ryml::from_chars(data_files[i].val(), &data_file);
+        ryml::from_chars(index_files[i].val(), &index_file);
 
-    data_file_offsets_.assign(data_file_offsets, data_file_offsets + num_data_files);
+        std::string data_file_path = cpppath::join({data_folder_path, data_file});
+        std::string index_file_path = cpppath::join({data_folder_path, index_file});
 
-    std::string data_file_prefix = index_file.substr(0, index_file.find_last_of('.')) + "_";
+        data_files_.push_back(data_file_path);
+        index_files_.push_back(index_file_path);
+    }
 
-    for (size_t i = 0; i < num_data_files; ++i) {
-        std::string data_file_name = data_file_prefix + std::to_string(i) + ".bin";
-        MappedFileReader data_reader;
-        if (!data_reader.Open(data_file_name)) {
+    return true;
+}
+
+
+//------------------------------------------------------------------------------
+// TokenizedDataLoader
+
+bool TokenizedDataLoader::Load(const std::string& data_folder_path) {
+    if (!global_index_yaml_.Read(data_folder_path)) {
+        std::cout << "Failed to read global index file at " << data_folder_path << std::endl;
+        return false;
+    }
+
+    total_num_regions_ = 0;
+
+    const int num_files = (int)global_index_yaml_.data_files_.size();
+    for (int i = 0; i < num_files; ++i) {
+        const std::string& data_file_path = global_index_yaml_.data_files_[i];
+        const std::string& index_file_path = global_index_yaml_.index_files_[i];
+
+        std::shared_ptr<MappedFileReader> data_reader = std::make_shared<MappedFileReader>();
+        if (!data_reader->Open(data_file_path)) {
+            std::cout << "Failed to open data file at " << data_file_path << std::endl;
             return false;
         }
-        data_files_.push_back(std::move(data_reader));
-    }
+
+        std::shared_ptr<MappedFileReader> index_reader = std::make_shared<MappedFileReader>();
+        if (!index_reader->Open(index_file_path)) {
+            std::cout << "Failed to open index file at " << index_file_path << std::endl;
+            return false;
+        }
+
+        uint64_t index_file_bytes = index_reader->GetSize();
+        uint64_t num_regions = (index_file_bytes - 8 - 2) / sizeof(uint32_t);
+        if (num_regions > UINT32_MAX) {
+            std::cout << "Too many regions in index file at " << index_file_path << std::endl;
+            return false;
+        }
+        num_regions_.push_back(num_regions);
+        total_num_regions_ += num_regions;
+    };
 
     return true;
 }
@@ -155,20 +203,9 @@ bool verify_files(
 
 bool data_verify(const std::string& data_folder_path)
 {
-    std::string index_file_path = cpppath::join({data_folder_path, DATALOADER_MAIN_INDEX_FILE});
-
-    MappedFileReader index_reader;
-    if (!index_reader.Open(index_file_path)) {
-        return false;
-    }
-
-    ryml::csubstr yaml_substr((const char*)index_reader.GetData(), index_reader.GetSize());
-    ryml::Tree tree = ryml::parse(yaml_substr);
-    ryml::ConstNodeRef data_files = tree["data_files"];
-    ryml::ConstNodeRef index_files = tree["index_files"];
-    if (data_files.invalid() || index_files.invalid() ||
-        !data_files.is_seq() || !index_files.is_seq() ||
-        data_files.num_children() != index_files.num_children()) {
+    GlobalIndexYaml global_index_yaml;
+    if (!global_index_yaml.Read(data_folder_path)) {
+        std::cout << "Failed to read global index file at " << data_folder_path << std::endl;
         return false;
     }
 
@@ -177,15 +214,11 @@ bool data_verify(const std::string& data_folder_path)
 
     std::atomic<bool> data_error(false);
     std::atomic<int> files_verified(0);
-    const int num_files = (int)data_files.num_children();
 
+    const int num_files = (int)global_index_yaml.data_files_.size();
     for (int i = 0; i < num_files; ++i) {
-        std::string data_file, index_file;
-        ryml::from_chars(data_files[i].val(), &data_file);
-        ryml::from_chars(index_files[i].val(), &index_file);
-
-        std::string data_file_path = cpppath::join({data_folder_path, data_file});
-        std::string index_file_path = cpppath::join({data_folder_path, index_file});
+        const std::string& data_file_path = global_index_yaml.data_files_[i];
+        const std::string& index_file_path = global_index_yaml.index_files_[i];
 
         const int max_active_tasks = 2;
         pool.QueueTask([&files_verified, num_files, &data_error, data_file_path, index_file_path](int worker_index) {
