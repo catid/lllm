@@ -4,7 +4,7 @@ project(cpp_dataloader C CXX)
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
 
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Debug)
+    set(CMAKE_BUILD_TYPE Debug) #FIXME: Release
 endif()
 
 if(MSVC)
@@ -20,6 +20,9 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 find_package(PythonLibs REQUIRED)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+find_package(LibUring REQUIRED)
 
 file(GLOB_RECURSE ZSTD_SRC_FILES 
     "${CMAKE_CURRENT_SOURCE_DIR}/zstd/*.c"
@@ -66,6 +69,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 target_link_libraries(${PROJECT_NAME} PUBLIC
     ${PYTHON_LIBRARIES}
+    LibUring::uring
     Threads::Threads
 )
 
@@ -76,6 +80,10 @@ target_link_libraries(test_compressor ${PROJECT_NAME})
 # Test executable test_mapped_file
 add_executable(test_mapped_file tests/test_mapped_file.cpp)
 target_link_libraries(test_mapped_file ${PROJECT_NAME})
+
+# Test executable test_uring_file
+add_executable(test_uring_file tests/test_uring_file.cpp)
+target_link_libraries(test_uring_file ${PROJECT_NAME})
 
 # Test executable test_worker_pool
 add_executable(test_worker_pool tests/test_worker_pool.cpp)

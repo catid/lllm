@@ -52,13 +52,13 @@ bool GlobalIndexYaml::Read(const std::string& data_folder_path) {
 //------------------------------------------------------------------------------
 // TokenizedDataLoader
 
-bool TokenizedDataLoader::Load(const std::string& data_folder_path) {
+bool TokenizedDataLoader::Start(const std::string& data_folder_path) {
     if (!global_index_yaml_.Read(data_folder_path)) {
         std::cout << "Failed to read global index file at " << data_folder_path << std::endl;
         return false;
     }
 
-    total_num_regions_ = 0;
+    uint64_t total_num_regions = 0;
 
     const int num_files = (int)global_index_yaml_.data_files_.size();
     for (int i = 0; i < num_files; ++i) {
@@ -84,25 +84,46 @@ bool TokenizedDataLoader::Load(const std::string& data_folder_path) {
             return false;
         }
         num_regions_.push_back(num_regions);
-        total_num_regions_ += num_regions;
+        total_num_regions += num_regions;
     };
 
+    total_num_regions_ = total_num_regions;
+    if (total_num_regions_ >= UINT32_MAX) {
+        std::cout << "FIXME: Too many regions overall: " << total_num_regions_ << std::endl;
+        return false;
+    }
+
+    pool_.Start();
+
     return true;
+}
+
+void TokenizedDataLoader::Stop()
+{
+    pool_.Stop();
 }
 
 uint64_t TokenizedDataLoader::StartEpoch(uint64_t seed0, uint64_t seed1, uint32_t micro_batch_size, uint32_t context_size) {
     micro_batch_size_ = micro_batch_size;
     context_size_ = context_size;
 
-    uint64_t num_microbatches = data_file_offsets_.back() / (micro_batch_size * context_size * sizeof(uint16_t));
-    microbatch_indices_.resize(num_microbatches);
-    std::iota(microbatch_indices_.begin(), microbatch_indices_.end(), 0);
+    microbatch_indices_.resize(total_num_regions_);
+    for (uint64_t i = 0; i < total_num_regions_; ++i) {
+        microbatch_indices_[i] = i;
+    }
 
+    // Randomly order the microbatches
     std::seed_seq seed{seed0, seed1};
     std::mt19937 rng(seed);
     std::shuffle(microbatch_indices_.begin(), microbatch_indices_.end(), rng);
 
-    return num_microbatches;
+    for (uint32_t i = 0; i < micro_batch_size * 2; ++i) {
+        pool_.QueueTask([this](int worker_index) {
+            
+        },
+    }
+
+    return total_num_regions_;
 }
 
 bool TokenizedDataLoader::GetTokenArray(

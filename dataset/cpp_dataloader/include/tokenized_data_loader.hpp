@@ -25,7 +25,13 @@ struct GlobalIndexYaml {
 
 class TokenizedDataLoader {
 public:
-    bool Load(const std::string& data_folder_path);
+    ~TokenizedDataLoader() {
+        Stop();
+    }
+
+    bool Start(const std::string& data_folder_path);
+
+    void Stop();
 
     uint64_t StartEpoch(
         uint64_t seed0,
@@ -49,6 +55,10 @@ private:
 
     uint32_t micro_batch_size_ = 0;
     uint32_t context_size_ = 0;
+
+    std::vector<uint32_t> microbatch_indices_;
+
+    WorkerPool pool_;
 };
 
 
