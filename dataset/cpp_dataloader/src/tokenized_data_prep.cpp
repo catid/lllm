@@ -45,6 +45,10 @@ bool CompressorContext::WriteTokenizedText(
     current_file_bytes_ += compressor.Result.size();
     current_file_hash_ ^= CityHash64(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size());
 
+    if ((uint32_t)compressor.Result.size() > max_region_bytes_) {
+        max_region_bytes_ = (uint32_t)compressor.Result.size();
+    }
+
     if (current_file_.fail() || current_index_.fail()) {
         std::cerr << "Failed to write to files" << std::endl;
         return false;
@@ -61,10 +65,28 @@ bool CompressorContext::WriteTokenizedText(
 
 bool CompressorContext::FinishCurrentFile()
 {
+    /*
+        End of index file format:
+            <final data file size (4 bytes)>
+            <max region size (4 bytes)>
+            <final index file hash (8 bytes)>
+
+        The hash also includes the final two fields, hashed individually for consistency.
+    */
     char current_offset_buffer[4];
     write_uint32_le(current_offset_buffer, current_file_bytes_);
     current_index_.write(current_offset_buffer, sizeof(current_offset_buffer));
     current_index_hash_ ^= CityHash64(current_offset_buffer, sizeof(current_offset_buffer));
+
+    char max_region_bytes_buffer[4];
+    write_uint32_le(max_region_bytes_buffer, max_region_bytes_);
+    current_index_.write(max_region_bytes_buffer, sizeof(max_region_bytes_buffer));
+    current_index_hash_ ^= CityHash64(max_region_bytes_buffer, sizeof(max_region_bytes_buffer));
+
+    /*
+        End of data file format:
+            <final data file hash (8 bytes)>
+    */
 
     char file_hash_buffer[8], index_hash_buffer[8];
     write_uint64_le(file_hash_buffer, current_file_hash_);

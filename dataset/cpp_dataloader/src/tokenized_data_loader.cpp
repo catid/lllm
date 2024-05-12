@@ -185,7 +185,10 @@ bool verify_files(
     size_t index_size = index_reader.GetSize();
     uint64_t index_hash = read_uint64_le(index_data + index_size - 8);
     index_hash ^= CityHash64(index_data, sizeof(uint32_t));
-    size_t word_count = (index_size - 8) / sizeof(uint32_t);
+    size_t word_count = (index_size - 8 - 4) / sizeof(uint32_t);
+
+    uint32_t max_region_bytes = read_uint32_le(index_data + index_size - 12);
+    index_hash ^= CityHash64(index_data + index_size - 12, sizeof(uint32_t));
 
     MappedFileReader data_reader;
     if (!data_reader.Open(data_file_path)) {
@@ -206,6 +209,11 @@ bool verify_files(
             return false;
         }
         uint32_t bytes = end - start;
+
+        if (bytes > max_region_bytes) {
+            std::cout << "Incorrect max region size: " << bytes << " > " << max_region_bytes << std::endl;
+            return false;
+        }
 
         index_hash ^= CityHash64(current_offset_buffer, sizeof(uint32_t));
 

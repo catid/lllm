@@ -20,8 +20,10 @@
 //------------------------------------------------------------------------------
 // IoReuseAllocator
 
-IoReuseAllocator::IoReuseAllocator(int buffer_bytes) {
+void IoReuseAllocator::SetBlockSize(int buffer_bytes, int block_size)
+{
     buffer_bytes_ = buffer_bytes;
+    block_size_ = block_size;
 }
 
 std::shared_ptr<io_data> IoReuseAllocator::Allocate() {
@@ -34,7 +36,10 @@ std::shared_ptr<io_data> IoReuseAllocator::Allocate() {
         Freed.pop_back();
     } else {
         data = std::make_shared<io_data>();
-        data->buffer = (uint8_t*)aligned_alloc(4096, buffer_bytes_);
+        data->buffer = (uint8_t*)aligned_alloc(block_size_, buffer_bytes_);
+        if (!data->buffer) {
+            return nullptr;
+        }
         Used.push_back(data);
     }
 
@@ -64,12 +69,21 @@ void IoReuseAllocator::Free(io_data* data) {
 //------------------------------------------------------------------------------
 // AsyncUringReader
 
-bool AsyncUringReader::Open(const char* filename, int queue_depth) {
+bool AsyncUringReader::Open(const char* filename, int max_buffer_bytes, int queue_depth) {
     fd = open(filename, O_RDONLY | O_DIRECT);
     if (fd < 0) {
         perror("AsyncUringReader: open failed");
         return false;
     }
+
+    int block_size;
+    if (ioctl(fd, BLKSSZGET, &block_size) < 0) {
+        perror("AsyncUringReader: ioctl failed");
+        close(fd);
+        return false;
+    }
+
+    Allocator.SetBlockSize(max_buffer_bytes, block_size);
 
     if (io_uring_queue_init(queue_depth, &ring, 0) < 0) {
         perror("AsyncUringReader: io_uring_queue_init failed");
@@ -121,7 +135,7 @@ bool AsyncUringReader::Read(
     void* user_data)
 {
     auto data = Allocator.Allocate();
-    if (data->length < length) {
+    if (!data || data->length < length) {
         std::cerr << "AsyncUringReader: buffer too small" << std::endl;
         return false;
     }
@@ -139,7 +153,7 @@ bool AsyncUringReader::Read(
     io_uring_sqe_set_data(sqe, data.get());
     int r = io_uring_submit(&ring);
     if (r < 0) {
-        std::cerr << "AsyncUringReader: io_uring_submit failed: " << r << std::endl;
+        std::cerr << "AsyncUringReader: io_uring_submit failed: " << r << " (" << strerror(-r) << ")" << std::endl;
         return false;
     }
 

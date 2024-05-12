@@ -38,13 +38,14 @@ struct io_data {
 
 class IoReuseAllocator {
 public:
-    IoReuseAllocator(int buffer_bytes = 4096);
+    void SetBlockSize(int buffer_bytes, int block_size);
 
     std::shared_ptr<io_data> Allocate();
     void Free(io_data* data);
 
 private:
     int buffer_bytes_ = 0;
+    int block_size_ = 0;
 
     std::mutex Lock;
     std::vector<std::shared_ptr<io_data>> Freed;
@@ -57,16 +58,14 @@ private:
 
 class AsyncUringReader {
 public:
-    AsyncUringReader(int buffer_bytes = 4096)
-        : Allocator(buffer_bytes)
-    {}
     ~AsyncUringReader() {
         Close();
     }
 
-    bool Open(const char* filename, int queue_depth);
+    bool Open(const char* filename, int max_buffer_bytes = 4096, int queue_depth = 8);
     void Close();
 
+    // Returns false if the reader is busy
     bool Read(
         off_t offset,
         size_t length,
@@ -80,6 +79,7 @@ private:
     bool ring_initialized = false;
 
     int fd = -1;
+    int block_size_ = 0;
     std::atomic<int> inflight = ATOMIC_VAR_INIT(0); 
 
     IoReuseAllocator Allocator;
