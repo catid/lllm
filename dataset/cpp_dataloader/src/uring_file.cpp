@@ -138,7 +138,7 @@ bool AsyncUringReader::Read(
 {
     auto data = Allocator.Allocate();
     if (!data || data->length < length) {
-        std::cerr << "AsyncUringReader: buffer too small " << length << " > " << data->length << std::endl;
+        std::cerr << "AsyncUringReader: internal buffer too small for " << length << std::endl;
         return false;
     }
     data->length = length;

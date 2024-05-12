@@ -21,14 +21,19 @@ find_package(Threads REQUIRED)
 
 find_package(PythonLibs REQUIRED)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-find_package(LibUring REQUIRED)
+file(GLOB_RECURSE URING_SRC_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/uring/*.c"
+)
 
-file(GLOB_RECURSE ZSTD_SRC_FILES 
+file(GLOB_RECURSE URING_HEADER_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/uring/*.h"
+)
+
+file(GLOB_RECURSE ZSTD_SRC_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/zstd/*.c"
 )
 
-file(GLOB_RECURSE ZSTD_HEADER_FILES 
+file(GLOB_RECURSE ZSTD_HEADER_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/zstd/*.h"
 )
 
@@ -55,9 +60,12 @@ add_library(${PROJECT_NAME} SHARED
     cpppath/cpppath.h
     ${ZSTD_SRC_FILES}
     ${ZSTD_HEADER_FILES}
+    ${URING_SRC_FILES}
+    ${URING_HEADER_FILES}
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/uring/include
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/ryml
@@ -69,7 +77,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 target_link_libraries(${PROJECT_NAME} PUBLIC
     ${PYTHON_LIBRARIES}
-    LibUring::uring
     Threads::Threads
 )
 

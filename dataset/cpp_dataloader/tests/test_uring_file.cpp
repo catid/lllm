@@ -8,9 +8,9 @@
 #include <fstream>
 
 const char* kTestFile = "test_file.bin";
-const size_t kTestFileSize = 8192 * 100;
-const int kNumReads = 16 * 100;
-const int kMaxBufferBytes = 512;
+const int kNumReads = 1000;
+const int kReadBytes = 4096;
+const size_t kTestFileSize = kReadBytes * kNumReads;
 
 std::hash<std::string> hasher;
 std::vector<size_t> hashes;
@@ -25,9 +25,9 @@ void create_test_file() {
 
     for (size_t i = 0; i < kNumReads; ++i) {
         std::string data;
-        data.reserve(kTestFileSize / kNumReads);
+        data.reserve(kReadBytes);
 
-        for (size_t j = 0; j < kTestFileSize / kNumReads; ++j) {
+        for (size_t j = 0; j < kReadBytes; ++j) {
             char byte = static_cast<char>(rand() % 256);
             data.push_back(byte);
         }
@@ -43,9 +43,9 @@ void create_test_file() {
 void read_callback(ssize_t res, uint8_t* buffer, void* user_data) {
     size_t index = *reinterpret_cast<size_t*>(user_data);
 
-    if (res != kTestFileSize / kNumReads) {
+    if (res != kReadBytes) {
         std::cerr << "Read size mismatch for request " << index << ". Expected: "
-                  << kTestFileSize / kNumReads << ", Actual: " << res << " (" << strerror(-res) << ")" << std::endl;
+                  << kReadBytes << ", Actual: " << res << " (" << strerror(-res) << ")" << std::endl;
         exit(-1);
     } else {
         //std::cout << "Read completed for request " << index << ". Bytes read: " << res << std::endl;
@@ -69,26 +69,20 @@ bool RunTest() {
 
     std::cout << "Creating AsyncUringReader..." << std::endl;
     AsyncUringReader reader;
-    if (!reader.Open(kTestFile, kMaxBufferBytes, 16)) {
+    if (!reader.Open(kTestFile, kReadBytes, 16)) {
         std::cerr << "Failed to open AsyncUringReader" << std::endl;
         return false;
     }
 
     int64_t t0 = GetNsec();
 
-    size_t block_bytes = kTestFileSize / kNumReads;
-
     std::vector<size_t> indices(kNumReads);
     for (size_t i = 0; i < kNumReads; ++i) {
         indices[i] = i;
-        size_t read_bytes = block_bytes;
-        if (i * block_bytes + block_bytes > kTestFileSize) {
-            read_bytes = kTestFileSize - i * block_bytes;
-        }
         //std::cout << "Submitting read request " << i << "..." << std::endl;
         bool success = reader.Read(
-            i * block_bytes,
-            read_bytes,
+            i * kReadBytes,
+            kReadBytes,
             read_callback,
             &indices[i]);
         if (!success) {
