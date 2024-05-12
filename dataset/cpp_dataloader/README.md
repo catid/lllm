@@ -12,7 +12,8 @@ python setup.py install
 
 ## Thanks
 
-Third party libraries used:
+Latest versions of thirdparty libraries are included:
+
 * `rapidyaml` from https://github.com/biojppm/rapidyaml
 * `cpppath` from https://github.com/tdegeus/cpppath
 * `cityhash` from https://github.com/google/cityhash

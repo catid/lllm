@@ -21,13 +21,12 @@
 //------------------------------------------------------------------------------
 // IoReuseAllocator
 
-void IoReuseAllocator::SetBlockSize(int buffer_bytes, int block_size)
+void IoReuseAllocator::SetAlignBytes(int align_bytes)
 {
-    buffer_bytes_ = buffer_bytes;
-    block_size_ = block_size;
+    align_bytes_ = align_bytes;
 }
 
-std::shared_ptr<io_data> IoReuseAllocator::Allocate() {
+std::shared_ptr<io_data> IoReuseAllocator::Allocate(int bytes) {
     std::lock_guard<std::mutex> lock(Lock);
 
     std::shared_ptr<io_data> data;
@@ -35,57 +34,66 @@ std::shared_ptr<io_data> IoReuseAllocator::Allocate() {
     if (!Freed.empty()) {
         data = Freed.back();
         Freed.pop_back();
+        if (data->buffer_bytes < bytes) {
+            free(data->buffer);
+            data->buffer = nullptr;
+        }
     } else {
         data = std::make_shared<io_data>();
-        data->buffer = (uint8_t*)aligned_alloc(block_size_, buffer_bytes_);
+    }
+
+    if (!data->buffer) {
+        data->buffer = (uint8_t*)aligned_alloc(align_bytes_, bytes);
         if (!data->buffer) {
             return nullptr;
         }
-        Used.push_back(data);
     }
 
-    data->length = buffer_bytes_;
+    Used.push_back(data);
+
+    data->buffer_bytes = bytes;
     data->callback = nullptr;
-    data->user_data = nullptr;
-    data->offset = 0;
     return data;
 }
 
 void IoReuseAllocator::Free(io_data* data) {
-    data->callback = nullptr;
-
     std::lock_guard<std::mutex> lock(Lock);
 
     for (auto it = Used.begin(); it != Used.end(); ++it) {
         if (it->get() == data) {
             auto shared_ptr = *it;
-            Used.erase(it);
             Freed.push_back(shared_ptr);
-            break;
+            Used.erase(it);
+            data->callback = nullptr;
+            return;
         }
     }
+
+    std::cerr << "Failed to free io_data: Not found in Used list" << std::endl;
 }
 
 
 //------------------------------------------------------------------------------
 // AsyncUringReader
 
-bool AsyncUringReader::Open(const char* filename, int max_buffer_bytes, int queue_depth) {
+bool AsyncUringReader::Open(
+    const char* filename,
+    int queue_depth)
+{
+    // Align allocations to the block size of the file device
     struct statvfs buf;
-    int block_size = 4096;
-    if (statvfs(filename, &buf) != 0) {
-        perror("statvfs");
-    } else {
+    int block_size = 4096; // Good default for most block devices
+    if (statvfs(filename, &buf) == 0) {
         block_size = buf.f_bsize;
     }
+
+    Allocator.SetAlignBytes(block_size);
 
     fd = open(filename, O_RDONLY | O_DIRECT);
     if (fd < 0) {
         perror("AsyncUringReader: open failed");
         return false;
     }
-
-    Allocator.SetBlockSize(max_buffer_bytes, block_size);
 
     if (io_uring_queue_init(queue_depth, &ring, 0) < 0) {
         perror("AsyncUringReader: io_uring_queue_init failed");
@@ -109,6 +117,13 @@ void AsyncUringReader::Close() {
     }
     JoinThread(Thread);
 
+    while (inflight > 0) {
+        struct io_uring_cqe* cqe = nullptr;
+        io_uring_wait_cqe(&ring, &cqe);
+        HandleCqe(cqe);
+        io_uring_cqe_seen(&ring, cqe);
+    }
+
     if (ring_initialized) {
         io_uring_queue_exit(&ring);
         ring = io_uring{};
@@ -117,13 +132,26 @@ void AsyncUringReader::Close() {
     if (fd >= 0) {
         close(fd);
     }
+
+    if (inflight > 0) {
+        std::cerr << "AsyncUringReader: Not all inflight requests were completed.  inflight = " << inflight << std::endl;
+    }
 }
 
 void AsyncUringReader::HandleCqe(struct io_uring_cqe* cqe) {
     io_data* data = static_cast<io_data*>(io_uring_cqe_get_data(cqe));
 
-    // Passes errors to the callback: Negative values are errors
-    data->callback(cqe->res, data->buffer, data->user_data);
+    if (!data) {
+        std::cerr << "AsyncUringReader: Invalid data pointer" << std::endl;
+        return;
+    }
+
+    if (cqe->res < 0 || cqe->res + data->app_offset < data->app_bytes) {
+        std::cerr << "AsyncUringReader: Error in callback.  res = " << cqe->res << std::endl;
+        data->callback(nullptr, 0);
+    } else {
+        data->callback(data->buffer + data->app_offset, data->app_bytes);
+    }
 
     Allocator.Free(data);
 
@@ -131,27 +159,31 @@ void AsyncUringReader::HandleCqe(struct io_uring_cqe* cqe) {
 }
 
 bool AsyncUringReader::Read(
-    off_t offset,
-    size_t length,
-    ReadCallback callback,
-    void* user_data)
+    uint64_t offset,
+    uint32_t bytes,
+    ReadCallback callback)
 {
-    auto data = Allocator.Allocate();
-    if (!data || data->length < length) {
-        std::cerr << "AsyncUringReader: internal buffer too small for " << length << std::endl;
+    // Round offset down to the nearest 512-byte block
+    // Then round read length up to the nearest 512-byte block
+    uint32_t app_offset = (uint32_t)offset & 511;
+    uint64_t request_offset = offset - app_offset;
+    uint32_t request_bytes = ((bytes + app_offset + 511) & ~511);
+
+    auto data = Allocator.Allocate(request_bytes);
+    if (!data) {
         return false;
     }
-    data->length = length;
-    data->offset = offset;
     data->callback = callback;
-    data->user_data = user_data;
+    data->request_bytes = request_bytes;
+    data->app_offset = app_offset;
+    data->app_bytes = bytes;
 
     struct io_uring_sqe* sqe = io_uring_get_sqe(&ring);
     if (!sqe) {
         return false;
     }
 
-    io_uring_prep_read(sqe, fd, data->buffer, length, offset);
+    io_uring_prep_read(sqe, fd, data->buffer, request_bytes, request_offset);
     io_uring_sqe_set_data(sqe, data.get());
     int r = io_uring_submit(&ring);
     if (r < 0) {

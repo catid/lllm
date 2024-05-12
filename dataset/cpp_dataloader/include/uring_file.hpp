@@ -18,8 +18,8 @@
 //------------------------------------------------------------------------------
 // IoReuseAllocator
 
-// Passes errors to the callback: Negative values are errors
-using ReadCallback = std::function<void(ssize_t bytes, uint8_t* buffer, void* user_data)>;
+// On error passes nullptr buffer and negative bytes to the callback
+using ReadCallback = std::function<void(uint8_t* buffer, uint32_t bytes)>;
 
 struct io_data {
     ~io_data() {
@@ -28,24 +28,24 @@ struct io_data {
         }
     }
 
-    size_t length = 0;
+    int buffer_bytes = 0;
     uint8_t* buffer = nullptr;
 
-    off_t offset = 0;
     ReadCallback callback;
-    void* user_data = nullptr;
+    uint32_t request_bytes = 0;
+    uint32_t app_offset = 0;
+    uint32_t app_bytes = 0;
 };
 
 class IoReuseAllocator {
 public:
-    void SetBlockSize(int buffer_bytes, int block_size);
+    void SetAlignBytes(int align_bytes);
 
-    std::shared_ptr<io_data> Allocate();
+    std::shared_ptr<io_data> Allocate(int bytes);
     void Free(io_data* data);
 
 private:
-    int buffer_bytes_ = 0;
-    int block_size_ = 0;
+    int align_bytes_ = 4096;
 
     std::mutex Lock;
     std::vector<std::shared_ptr<io_data>> Freed;
@@ -62,15 +62,16 @@ public:
         Close();
     }
 
-    bool Open(const char* filename, int max_buffer_bytes = 4096, int queue_depth = 8);
+    bool Open(
+        const char* filename,
+        int queue_depth = 8);
     void Close();
 
     // Returns false if the reader is busy
     bool Read(
-        off_t offset,
-        size_t length,
-        ReadCallback callback,
-        void* user_data = nullptr);
+        uint64_t offset,
+        uint32_t bytes,
+        ReadCallback callback);
 
     bool IsBusy() const { return inflight > 0; }
 
@@ -80,6 +81,7 @@ private:
 
     int fd = -1;
     int block_size_ = 0;
+    int read_align_bytes_ = 0;
     std::atomic<int> inflight = ATOMIC_VAR_INIT(0); 
 
     IoReuseAllocator Allocator;
