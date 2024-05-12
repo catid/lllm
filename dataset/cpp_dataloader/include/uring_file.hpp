@@ -54,6 +54,32 @@ private:
 
 
 //------------------------------------------------------------------------------
+// FileEndCache
+
+static const int kFileEndCacheBytes = 4096;
+
+/*
+    This class caches the last kFileEndCacheBytes bytes of the file.
+    It helps to avoid reading past the physical end of the file,
+    which may help avoid OS bugs.
+    My version of Linux io_uring handles this well already, but
+    it's possible that other implementations don't.
+*/
+struct FileEndCache {
+    bool FillCache(const std::string& file_path);
+
+    // Invokes callback if fully satisfied and returns true.
+    bool IsFullySatisfied(uint64_t offset, uint32_t bytes, ReadCallback callback);
+
+    uint64_t FileBytes = 0;
+
+    uint8_t FinalBuffer[kFileEndCacheBytes];
+    uint64_t FinalOffset = 0;
+    uint32_t FinalBytes = 0;
+};
+
+
+//------------------------------------------------------------------------------
 // AsyncUringReader
 
 class AsyncUringReader {
@@ -63,11 +89,12 @@ public:
     }
 
     bool Open(
-        const char* filename,
+        const std::string& file_path,
         int queue_depth = 8);
     void Close();
 
-    // Returns false if the reader is busy
+    // Returns false if the reader is busy.
+    // This can invoke the callback during the Read() call if it is in cache.
     bool Read(
         uint64_t offset,
         uint32_t bytes,
@@ -91,6 +118,8 @@ private:
 
     std::mutex Lock;
     std::condition_variable Condition;
+
+    FileEndCache EndCache;
 
     void HandleCqe(struct io_uring_cqe* cqe);
 

@@ -2,7 +2,9 @@
 #ifndef LIB_URING_H
 #define LIB_URING_H
 
+#ifndef __USE_MISC
 #define __USE_MISC
+#endif
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -12,11 +14,15 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <time.h>
+#ifndef __USE_ATFILE
 #define __USE_ATFILE
+#endif
 #include <fcntl.h>
 #include <sched.h>
 #include <linux/swab.h>
+#ifndef __USE_XOPEN_EXTENDED
 #define __USE_XOPEN_EXTENDED
+#endif
 #include <sys/wait.h>
 
 /* SPDX-License-Identifier: MIT */

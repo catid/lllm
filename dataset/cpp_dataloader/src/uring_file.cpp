@@ -16,6 +16,7 @@
 #include <sys/statvfs.h>
 
 #include <iostream>
+#include <fstream>
 
 
 //------------------------------------------------------------------------------
@@ -74,24 +75,68 @@ void IoReuseAllocator::Free(io_data* data) {
 
 
 //------------------------------------------------------------------------------
+// FileEndCache
+
+bool FileEndCache::FillCache(const std::string& file_path) {
+    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+    if (!file) {
+        std::cerr << "FileEndCache: Failed to open file: " << file_path << std::endl;
+        return false;
+    }
+
+    FileBytes = file.tellg();
+
+    FinalBytes = std::min(kFileEndCacheBytes, static_cast<int>(FileBytes));
+    FinalOffset = FileBytes - FinalBytes;
+
+    file.seekg(FinalOffset);
+    if (!file) {
+        std::cerr << "FileEndCache: Failed to seek to position: " << FinalOffset << std::endl;
+        return false;
+    }
+
+    file.read(reinterpret_cast<char*>(FinalBuffer), FinalBytes);
+    if (!file) {
+        std::cerr << "FileEndCache: Failed to read " << FinalBytes << " bytes from file" << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+bool FileEndCache::IsFullySatisfied(uint64_t offset, uint32_t bytes, ReadCallback callback)
+{
+    if (offset >= FinalOffset) {
+        callback(FinalBuffer + offset - FinalOffset, bytes);
+        return true;
+    }
+    return false;
+}
+
+
+//------------------------------------------------------------------------------
 // AsyncUringReader
 
 bool AsyncUringReader::Open(
-    const char* filename,
+    const std::string& file_path,
     int queue_depth)
 {
     // Align allocations to the block size of the file device
     struct statvfs buf;
     int block_size = 4096; // Good default for most block devices
-    if (statvfs(filename, &buf) == 0) {
+    if (statvfs(file_path.c_str(), &buf) == 0) {
         block_size = buf.f_bsize;
     }
 
     Allocator.SetAlignBytes(block_size);
 
-    fd = open(filename, O_RDONLY | O_DIRECT);
+    fd = open(file_path.c_str(), O_RDONLY | O_DIRECT);
     if (fd < 0) {
         perror("AsyncUringReader: open failed");
+        return false;
+    }
+
+    if (!EndCache.FillCache(file_path)) {
         return false;
     }
 
@@ -163,6 +208,10 @@ bool AsyncUringReader::Read(
     uint32_t bytes,
     ReadCallback callback)
 {
+    if (EndCache.IsFullySatisfied(offset, bytes, callback)) {
+        return true;
+    }
+
     // Round offset down to the nearest 512-byte block
     // Then round read length up to the nearest 512-byte block
     uint32_t app_offset = (uint32_t)offset & 511;
