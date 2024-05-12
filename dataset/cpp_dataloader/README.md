@@ -17,3 +17,4 @@ Third party libraries used:
 * `cpppath` from https://github.com/tdegeus/cpppath
 * `cityhash` from https://github.com/google/cityhash
 * `zstd` from https://github.com/facebook/zstd
+* `liburl` from https://github.com/axboe/liburing
