@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/statvfs.h>
 
 #include <iostream>
 
@@ -70,16 +71,17 @@ void IoReuseAllocator::Free(io_data* data) {
 // AsyncUringReader
 
 bool AsyncUringReader::Open(const char* filename, int max_buffer_bytes, int queue_depth) {
+    struct statvfs buf;
+    int block_size = 4096;
+    if (statvfs(filename, &buf) != 0) {
+        perror("statvfs");
+    } else {
+        block_size = buf.f_bsize;
+    }
+
     fd = open(filename, O_RDONLY | O_DIRECT);
     if (fd < 0) {
         perror("AsyncUringReader: open failed");
-        return false;
-    }
-
-    int block_size;
-    if (ioctl(fd, BLKSSZGET, &block_size) < 0) {
-        perror("AsyncUringReader: ioctl failed");
-        close(fd);
         return false;
     }
 
@@ -136,7 +138,7 @@ bool AsyncUringReader::Read(
 {
     auto data = Allocator.Allocate();
     if (!data || data->length < length) {
-        std::cerr << "AsyncUringReader: buffer too small" << std::endl;
+        std::cerr << "AsyncUringReader: buffer too small " << length << " > " << data->length << std::endl;
         return false;
     }
     data->length = length;

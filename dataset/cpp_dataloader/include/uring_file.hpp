@@ -70,7 +70,7 @@ public:
         off_t offset,
         size_t length,
         ReadCallback callback,
-        void* user_data);
+        void* user_data = nullptr);
 
     bool IsBusy() const { return inflight > 0; }
 
