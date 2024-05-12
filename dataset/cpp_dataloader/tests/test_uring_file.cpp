@@ -11,13 +11,13 @@
 #include <city.h>
 
 const char* kTestFile = "test_file.bin";
-const int kMinReads = 1000000;
+const int kMinReads = 10000000;
 const int kMaxReadBytes = 2048;
-const size_t kMinTestFileSize = kMaxReadBytes * kMinReads / 2;
+const size_t kMinTestFileSize = (size_t)kMaxReadBytes * (size_t)kMinReads / 2;
 
 std::vector<uint64_t> hashes;
 std::vector<uint32_t> read_sizes;
-std::vector<uint32_t> read_offsets;
+std::vector<uint64_t> read_offsets;
 int total_reads = 0;
 std::atomic<int> num_errors(0);
 
@@ -30,7 +30,7 @@ bool create_test_file() {
         return false;
     }
 
-    size_t total_bytes = 0;
+    uint64_t total_bytes = 0;
     uint8_t buffer[kMaxReadBytes];
 
     read_sizes.clear();
@@ -38,9 +38,9 @@ bool create_test_file() {
     total_reads = 0;
 
     while (total_bytes < kMinTestFileSize && total_reads < kMinReads) {
-        size_t read_size = rand() % kMaxReadBytes + 1;
+        int read_size = rand() % kMaxReadBytes + 1;
 
-        for (size_t j = 0; j < read_size; ++j) {
+        for (int j = 0; j < read_size; ++j) {
             buffer[j] = static_cast<uint8_t>(rand() % 256);
         }
 
@@ -82,7 +82,7 @@ bool RunTest() {
     for (int j = 0; j < total_reads; ++j) {
         uint32_t index = read_indices[j];
         uint32_t expected_bytes = read_sizes[index];
-        uint32_t read_offset = read_offsets[index];
+        uint64_t read_offset = read_offsets[index];
 
         bool success = reader.Read(read_offset, expected_bytes,
             [index, read_offset, expected_bytes](uint8_t* data, uint32_t bytes)

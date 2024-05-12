@@ -86,7 +86,7 @@ bool FileEndCache::FillCache(const std::string& file_path) {
 
     FileBytes = file.tellg();
 
-    FinalBytes = std::min(kFileEndCacheBytes, static_cast<int>(FileBytes));
+    FinalBytes = std::min((uint64_t)kFileEndCacheBytes, FileBytes);
     FinalOffset = FileBytes - FinalBytes;
 
     file.seekg(FinalOffset);
@@ -139,6 +139,8 @@ bool AsyncUringReader::Open(
     if (!EndCache.FillCache(file_path)) {
         return false;
     }
+
+    posix_fadvise(fd, 0, 0, POSIX_FADV_RANDOM);
 
     if (io_uring_queue_init(queue_depth, &ring, 0) < 0) {
         perror("AsyncUringReader: io_uring_queue_init failed");
