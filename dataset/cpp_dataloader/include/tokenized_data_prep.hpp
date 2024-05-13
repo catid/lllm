@@ -43,8 +43,6 @@ protected:
     uint64_t current_index_hash_ = 0;
     uint64_t current_file_bytes_ = 0;
 
-    uint32_t max_region_bytes_ = 0;
-
     Compressor compressor;
 };
 

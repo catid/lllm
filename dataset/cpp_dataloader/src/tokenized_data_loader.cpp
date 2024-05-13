@@ -50,50 +50,120 @@ bool GlobalIndexYaml::Read(const std::string& data_folder_path) {
 
 
 //------------------------------------------------------------------------------
+// DataShardContext
+
+bool DataShardContext::Open(
+    const std::string& data_file_path,
+    const std::string& index_file_path)
+{
+    std::shared_ptr<AsyncUringReader> data_reader = std::make_shared<AsyncUringReader>();
+    if (!data_reader->Open(data_file_path)) {
+        std::cout << "Failed to open data file at " << data_file_path << std::endl;
+        return false;
+    }
+
+    std::shared_ptr<MappedFileReader> index_reader = std::make_shared<MappedFileReader>();
+    if (!index_reader->Open(index_file_path)) {
+        std::cout << "Failed to open index file at " << index_file_path << std::endl;
+        return false;
+    }
+
+    uint64_t index_file_bytes = index_reader->GetSize();
+    uint64_t num_spans = (index_file_bytes - 8) / sizeof(uint32_t) - 1;
+    if (num_spans > UINT32_MAX) {
+        std::cout << "Too many regions in index file at " << index_file_path << std::endl;
+        return false;
+    }
+
+    NumSpans = num_spans;
+    DataFile = data_reader;
+    IndexFile = index_reader;
+    return true;
+}
+
+void DataShardContext::Close()
+{
+    DataFile = nullptr;
+    IndexFile = nullptr;
+}
+
+void DataShardContext::ShuffleIndices(uint64_t seed0, uint64_t seed1)
+{
+    std::seed_seq seed{seed0, seed1};
+    std::mt19937 rng(seed);
+
+    SpanIndices.reserve(NumSpans);
+    uint32_t* span_ptr = SpanIndices.data();
+    for (uint32_t i = 0; i < NumSpans; ++i) {
+        span_ptr[i] = i;
+    }
+
+    std::shuffle(SpanIndices.begin(), SpanIndices.end(), rng);
+}
+
+uint64_t DataShardContext::GetSpan(
+    uint32_t span_index,
+    uint32_t& bytes_out)
+{
+    uint32_t index = SpanIndices[span_index];
+    const uint8_t* span_data = IndexFile->GetData() + index * 4;
+    uint32_t start = read_uint32_le(span_data);
+    uint32_t end = read_uint32_le(span_data + 4);
+    uint32_t span_bytes = end - start;
+
+    bytes_out = span_bytes;
+    return start;
+}
+
+
+//------------------------------------------------------------------------------
 // TokenizedDataLoader
 
 bool TokenizedDataLoader::Start(const std::string& data_folder_path) {
-    if (!global_index_yaml_.Read(data_folder_path)) {
+    Stop();
+
+    global_index_yaml_ = std::make_shared<GlobalIndexYaml>();
+    if (!global_index_yaml_->Read(data_folder_path)) {
         std::cout << "Failed to read global index file at " << data_folder_path << std::endl;
         return false;
     }
 
-    uint64_t total_num_regions = 0;
+    pool_.Start();
 
-    const int num_files = (int)global_index_yaml_.data_files_.size();
+    worker_error_ = false;
+    prefill_inflight_ = 0;
+    next_shard_index_ = 0;
+    epoch_ = 0;
+    shards_ready_ = 0;
+    context_size_ = 0;
+    micro_batch_size_ = 0;
+
+    const int num_files = (int)global_index_yaml_->data_files_.size();
     for (int i = 0; i < num_files; ++i) {
-        const std::string& data_file_path = global_index_yaml_.data_files_[i];
-        const std::string& index_file_path = global_index_yaml_.index_files_[i];
+        const std::string& data_file_path = global_index_yaml_->data_files_[i];
+        const std::string& index_file_path = global_index_yaml_->index_files_[i];
 
-        std::shared_ptr<MappedFileReader> data_reader = std::make_shared<MappedFileReader>();
-        if (!data_reader->Open(data_file_path)) {
-            std::cout << "Failed to open data file at " << data_file_path << std::endl;
-            return false;
-        }
+        auto shard = std::make_shared<DataShardContext>();
+        shards_.push_back(shard);
 
-        std::shared_ptr<MappedFileReader> index_reader = std::make_shared<MappedFileReader>();
-        if (!index_reader->Open(index_file_path)) {
-            std::cout << "Failed to open index file at " << index_file_path << std::endl;
-            return false;
-        }
-
-        uint64_t index_file_bytes = index_reader->GetSize();
-        uint64_t num_regions = (index_file_bytes - 8 - 2) / sizeof(uint32_t);
-        if (num_regions > UINT32_MAX) {
-            std::cout << "Too many regions in index file at " << index_file_path << std::endl;
-            return false;
-        }
-        num_regions_.push_back(num_regions);
-        total_num_regions += num_regions;
+        pool_.QueueTask([this, shard, data_file_path, index_file_path](int /*worker_index*/) {
+            if (worker_error_) {
+                return;
+            }
+            if (!shard->Open(data_file_path, index_file_path)) {
+                std::cout << "Failed to open data file at " << data_file_path << std::endl;
+                worker_error_ = true;
+            }
+        });
     };
 
-    total_num_regions_ = total_num_regions;
-    if (total_num_regions_ >= UINT32_MAX) {
-        std::cout << "FIXME: Too many regions overall: " << total_num_regions_ << std::endl;
+    // Note this waits longer than necessary but this is expected to be a heavy call
+    pool_.WaitForTasks();
+
+    if (worker_error_) {
+        std::cout << "Failed to open all data files" << std::endl;
         return false;
     }
-
-    pool_.Start();
 
     return true;
 }
@@ -101,69 +171,179 @@ bool TokenizedDataLoader::Start(const std::string& data_folder_path) {
 void TokenizedDataLoader::Stop()
 {
     pool_.Stop();
+
+    decompressors_.clear();
+    output_used_.clear();
+    shards_.clear();
+    global_index_yaml_ = nullptr;
 }
 
-uint64_t TokenizedDataLoader::StartEpoch(uint64_t seed0, uint64_t seed1, uint32_t micro_batch_size, uint32_t context_size) {
+void TokenizedDataLoader::StartEpoch(
+    uint64_t seed0,
+    uint64_t seed1,
+    uint32_t micro_batch_size,
+    uint32_t context_size,
+    uint32_t data_stride)
+{
+    std::cout << "Epoch starting with " << micro_batch_size << " microbatches of " << context_size << " tokens each" << std::endl;
+
     micro_batch_size_ = micro_batch_size;
     context_size_ = context_size;
+    data_stride_ = data_stride;
 
-    microbatch_indices_.resize(total_num_regions_);
-    for (uint64_t i = 0; i < total_num_regions_; ++i) {
-        microbatch_indices_[i] = i;
+    ResetPrefill();
+
+    shards_ready_ = 0;
+    for (auto& shard : shards_) {
+        pool_.QueueTask([this, shard, seed0, seed1](int /*worker_index*/) {
+            shard->ShuffleIndices(seed0, seed1);
+
+            uint32_t ready_count = ++shards_ready_;
+            if (ready_count == shards_.size()) {
+                Prefill();
+            }
+        });
+
+        // Use a slightly different seed for each shard.  Not sure if it matters.
+        seed0++;
+    }
+}
+
+void TokenizedDataLoader::ResetPrefill()
+{
+    std::lock_guard<std::mutex> lock(prefill_mutex_);
+
+    // Increment epoch to discard old prefill requests
+    epoch_++;
+
+    next_shard_index_ = 0;
+    prefill_inflight_ = 0;
+
+    for (auto& buffer : prefilled_buffers_) {
+        allocator_.Free(buffer);
+    }
+    prefilled_buffers_.clear();
+    output_buffer_.clear();
+
+    // Resize to the number of prefill tasks
+    decompressors_.resize(micro_batch_size_);
+    for (int i = 0; i < micro_batch_size_; ++i) {
+        if (!decompressors_[i]) {
+            decompressors_[i] = std::make_shared<Decompressor>();
+        }
     }
 
-    // Randomly order the microbatches
-    std::seed_seq seed{seed0, seed1};
-    std::mt19937 rng(seed);
-    std::shuffle(microbatch_indices_.begin(), microbatch_indices_.end(), rng);
-
-#if 0
-    for (uint32_t i = 0; i < micro_batch_size * 2; ++i) {
-        pool_.QueueTask([this](int worker_index) {
-
-        },
+    shard_next_datum_.resize(shards_.size());
+    for (int i = 0; i < shards_.size(); ++i) {
+        shard_next_datum_[i] = 0;
     }
-#endif
+}
 
-    return total_num_regions_;
+void TokenizedDataLoader::Prefill() {
+    std::cout << "Shuffle complete.  Prefilling " << micro_batch_size_ << "..." << std::endl;
+
+    for (uint32_t prefill_dest_index = 0; prefill_dest_index < micro_batch_size_; ++prefill_dest_index)
+    {
+        ReadRequest request;
+        request.prefill_dest_index = prefill_dest_index;
+        request.epoch = epoch_;
+        request.shard_index = next_shard_index_;
+        request.shard_datum_index = shard_next_datum_[next_shard_index_]++;
+
+        pool_.QueueTask([this, request](int /*worker_index*/) {
+            // Read offsets from mmap index file
+            uint32_t bytes = 0;
+            uint64_t offset = shards_[request.shard_index]->GetSpan(request.shard_datum_index, bytes);
+
+            shards_[request.shard_index]->DataFile->Read(offset, bytes,
+                [this, request](uint8_t* data, uint32_t bytes)
+            {
+                if (epoch_ != request.epoch) {
+                    // Request has expired
+                    return;
+                }
+
+                auto& decompressor = decompressors_[request.prefill_dest_index];
+                if (!decompressor->Decompress(data, bytes, kCompressorByteStride)) {
+                    std::cerr << "Failed to decompress data" << std::endl;
+                    worker_error_ = true;
+                    return;
+                }
+
+                // FIXME: This should be writing to the output buffer
+            });
+
+        });
+    }
+}
+
+void TokenizedDataLoader::NextPrefill()
+{
+
 }
 
 bool TokenizedDataLoader::GetTokenArray(
-    uint64_t microbatch_index,
-    uint32_t context_size,
-    uint32_t* micro_batch_size,
-    uint32_t* num_tokens,
-    uint32_t* output_array)
+    uint32_t* micro_batch_out,
+    uint32_t* max_tokens_out,
+    uint32_t* output_batch,
+    uint8_t* is_continuation)
 {
-    if (microbatch_index >= microbatch_indices_.size()) {
-        return false;
+    // Wait until output is ready
+    {
+        std::unique_lock<std::mutex> lock(output_mutex_);
+        output_condition_.wait(lock, [this]{ return Terminated || output_ready_; });
+        if (Terminated) {
+            return false;
+        }
+        output_ready_ = false;
     }
 
-    uint64_t shuffled_index = microbatch_indices_[microbatch_index];
-    uint64_t offset = shuffled_index * micro_batch_size_ * context_size_ * sizeof(uint16_t);
+    uint32_t max_token_count = 0;
+    uint32_t num_rows = 0;
 
-#if 0
-    auto it = std::upper_bound(data_file_offsets_.begin(), data_file_offsets_.end(), offset);
-    size_t file_index = std::distance(data_file_offsets_.begin(), it) - 1;
+    for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index) {
+        auto& decompressor = decompressors_[batch_index];
+        if (!decompressor) {
+            continue;
+        }
+        const uint32_t* decompressed_ptr = reinterpret_cast<const uint32_t*>( decompressor->Result.data() );
+        const uint32_t decompressed_words = decompressor->Result.size() / 4;
 
-    uint64_t file_offset = offset - data_file_offsets_[file_index];
-    const uint8_t* compressed_data = data_files_[file_index].GetData() + file_offset;
+        uint32_t used = output_used_[batch_index];
+        const uint32_t available = decompressed_words - used;
+        if (available <= 0) {
+            continue;
+        }
+        uint32_t copy_bytes = std::min(available, context_size_);
 
-    Decompressor decompressor;
-    if (!decompressor.Decompress(compressed_data, data_files_[file_index].GetSize() - file_offset)) {
-        return false;
+        memcpy(output_batch, decompressed_ptr + used, copy_bytes * sizeof(uint32_t));
+        output_batch += copy_bytes;
+        max_token_count = std::max(max_token_count, copy_bytes);
+
+        uint32_t pad_bytes = context_size_ - copy_bytes;
+        if (pad_bytes > 0) {
+            memset(output_batch, kPaddingToken, pad_bytes * sizeof(uint32_t));
+            output_batch += pad_bytes;
+        }
+
+        // Signal continuation for this row
+        *is_continuation++ = (used != 0);
+
+        ++num_rows;
     }
 
-    uint32_t decompressed_size = decompressor.Result.size();
-    uint32_t num_elements = decompressed_size / sizeof(uint16_t);
+    // Pad the remaining unwritten rows with padding tokens
+    if (num_rows < micro_batch_size_) {
+        uint32_t pad_rows = micro_batch_size_ - num_rows;
+        assert(kPaddingToken == 0);
+        memset(output_batch, 0, pad_rows * context_size_ * sizeof(uint32_t));
+        memset(is_continuation, 0, pad_rows);
+    }
 
-    std::copy(reinterpret_cast<const uint16_t*>(decompressor.Result.data()),
-              reinterpret_cast<const uint16_t*>(decompressor.Result.data()) + num_elements,
-              output_array);
+    *micro_batch_out = num_rows;
+    *max_tokens_out = max_token_count;
 
-    *micro_batch_size = micro_batch_size_;
-    *num_tokens = num_elements;
-#endif
+    NextPrefill();
     return true;
 }
 
@@ -185,10 +365,7 @@ bool verify_files(
     size_t index_size = index_reader.GetSize();
     uint64_t index_hash = read_uint64_le(index_data + index_size - 8);
     index_hash ^= CityHash64(index_data, sizeof(uint32_t));
-    size_t word_count = (index_size - 8 - 4) / sizeof(uint32_t);
-
-    uint32_t max_region_bytes = read_uint32_le(index_data + index_size - 12);
-    index_hash ^= CityHash64(index_data + index_size - 12, sizeof(uint32_t));
+    size_t word_count = (index_size - 8) / sizeof(uint32_t);
 
     MappedFileReader data_reader;
     if (!data_reader.Open(data_file_path)) {
@@ -209,11 +386,6 @@ bool verify_files(
             return false;
         }
         uint32_t bytes = end - start;
-
-        if (bytes > max_region_bytes) {
-            std::cout << "Incorrect max region size: " << bytes << " > " << max_region_bytes << std::endl;
-            return false;
-        }
 
         index_hash ^= CityHash64(current_offset_buffer, sizeof(uint32_t));
 
@@ -247,13 +419,15 @@ bool data_verify(const std::string& data_folder_path)
     std::atomic<bool> data_error(false);
     std::atomic<int> files_verified(0);
 
+    const uint64_t t0 = GetNsec();
+
     const int num_files = (int)global_index_yaml.data_files_.size();
     for (int i = 0; i < num_files; ++i) {
         const std::string& data_file_path = global_index_yaml.data_files_[i];
         const std::string& index_file_path = global_index_yaml.index_files_[i];
 
         const int max_active_tasks = 2;
-        pool.QueueTask([&files_verified, num_files, &data_error, data_file_path, index_file_path](int worker_index) {
+        pool.QueueTask([t0, &files_verified, num_files, &data_error, data_file_path, index_file_path](int /*worker_index*/) {
             if (data_error) {
                 return;
             }
@@ -262,7 +436,11 @@ bool data_verify(const std::string& data_folder_path)
             }
             const int count = files_verified++;
             if (count % 10 == 0) {
-                std::cout << "verified " << count << "/" << num_files << std::endl;
+                uint64_t t1 = GetNsec();
+                double seconds_elapsed = (t1 - t0) / 1000000000.0;
+                double seconds_remaining = seconds_elapsed / count * (num_files - count);
+                std::cout << "Verified " << count << "/" << num_files << " files in "
+                    << seconds_elapsed << " seconds (" << seconds_remaining << " remaining)" << std::endl;
             }
         }, max_active_tasks);
 

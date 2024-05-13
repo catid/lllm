@@ -41,12 +41,12 @@ python -m dataset.download_dataset
 * Take LLaMA-3 70B Instruct-tuned output from each data chunk, and train the model to generate the same continuations (a way to skip fine-tuning?)
 * RHO-loss for the dataset using LLaMA-3 8B to provide reference loss for each token - need to convert to our tokenizer via approximation
 * Produce 4 tokens at once using 4x MLP heads
-* Train on 8K context
 * 90% RWKV-6, 10% Full Attention similar to Infini-Attention
 * MambaByte/SpaceByte style tokenization instead of using RWKV tokenizer
 * Add several neurons to the FFN layer that sigmoid gate the attention heads on the next layer
 * Additional residual skip connections
 * Gradually increasing dimension through the model
+* Share the majority of FFN weights between consecutive layers but only replace a few of them each time
 
 # TODO
 
