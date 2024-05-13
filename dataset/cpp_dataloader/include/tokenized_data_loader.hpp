@@ -54,8 +54,7 @@
 // ReadRequest
 
 struct ReadRequest {
-    uint32_t prefill_dest_index = 0;
-    uint32_t epoch = 0;
+    uint32_t batch_index = 0;
     uint32_t shard_index = 0;
     uint32_t shard_datum_index = 0;
 };
@@ -147,20 +146,16 @@ private:
     uint32_t context_size_ = 0;
     uint32_t data_stride_ = 0;
 
-    TokenizedAllocator allocator_;
-
     std::atomic<uint32_t> shards_ready_ = ATOMIC_VAR_INIT(0);
 
     std::mutex prefill_mutex_;
-    uint32_t epoch_ = 0;
     uint32_t next_shard_index_ = 0;
     std::vector<uint32_t> shard_next_datum_;
-    uint32_t prefill_inflight_ = 0;
+    std::atomic<uint32_t> prefill_inflight_ = ATOMIC_VAR_INIT(0);
 
     std::mutex output_mutex_;
     std::condition_variable output_condition_;
 
-    bool output_ready_ = false;
     std::vector<std::shared_ptr<Decompressor>> decompressors_;
 
     // If data is longer than GetTokenArray() can return, we break it into
@@ -169,7 +164,6 @@ private:
 
     void ResetPrefill();
     void Prefill();
-    void NextPrefill();
 };
 
 

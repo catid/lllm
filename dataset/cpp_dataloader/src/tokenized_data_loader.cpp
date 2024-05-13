@@ -23,7 +23,7 @@ bool GlobalIndexYaml::Read(const std::string& data_folder_path) {
     }
 
     ryml::csubstr yaml_substr((const char*)index_reader.GetData(), index_reader.GetSize());
-    ryml::Tree tree = ryml::parse(yaml_substr);
+    ryml::Tree tree = ryml::parse_in_arena(yaml_substr);
     ryml::ConstNodeRef data_files = tree["data_files"];
     ryml::ConstNodeRef index_files = tree["index_files"];
     if (data_files.invalid() || index_files.invalid() ||
@@ -133,7 +133,6 @@ bool TokenizedDataLoader::Start(const std::string& data_folder_path) {
     worker_error_ = false;
     prefill_inflight_ = 0;
     next_shard_index_ = 0;
-    epoch_ = 0;
     shards_ready_ = 0;
     context_size_ = 0;
     micro_batch_size_ = 0;
@@ -213,28 +212,22 @@ void TokenizedDataLoader::ResetPrefill()
 {
     std::lock_guard<std::mutex> lock(prefill_mutex_);
 
-    // Increment epoch to discard old prefill requests
-    epoch_++;
-
     next_shard_index_ = 0;
     prefill_inflight_ = 0;
 
-    for (auto& buffer : prefilled_buffers_) {
-        allocator_.Free(buffer);
-    }
-    prefilled_buffers_.clear();
-    output_buffer_.clear();
-
     // Resize to the number of prefill tasks
     decompressors_.resize(micro_batch_size_);
-    for (int i = 0; i < micro_batch_size_; ++i) {
-        if (!decompressors_[i]) {
-            decompressors_[i] = std::make_shared<Decompressor>();
+    output_used_.resize(micro_batch_size_);
+    for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index) {
+        if (!decompressors_[batch_index]) {
+            decompressors_[batch_index] = std::make_shared<Decompressor>();
         }
+        output_used_[batch_index] = 0;
+        decompressors_[batch_index]->Result.clear();
     }
 
     shard_next_datum_.resize(shards_.size());
-    for (int i = 0; i < shards_.size(); ++i) {
+    for (int i = 0; i < (int)shards_.size(); ++i) {
         shard_next_datum_[i] = 0;
     }
 }
@@ -242,14 +235,34 @@ void TokenizedDataLoader::ResetPrefill()
 void TokenizedDataLoader::Prefill() {
     std::cout << "Shuffle complete.  Prefilling " << micro_batch_size_ << "..." << std::endl;
 
-    for (uint32_t prefill_dest_index = 0; prefill_dest_index < micro_batch_size_; ++prefill_dest_index)
+    if (prefill_inflight_ > 0) {
+        std::cerr << "Internal error: Prefill still inflight" << std::endl; 
+        return;
+    }
+
+    std::vector<ReadRequest> requests;
+
+    for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index)
     {
+        auto& decompressor = decompressors_[batch_index];
+        const uint32_t decompressed_words = decompressor->Result.size() / 4;
+        const uint32_t used = output_used_[batch_index];
+
+        // If there is still data to read, do not prefill this row
+        if (used > 0 && used < decompressed_words) {
+            continue;
+        }
+
         ReadRequest request;
-        request.prefill_dest_index = prefill_dest_index;
-        request.epoch = epoch_;
+        request.batch_index = batch_index;
         request.shard_index = next_shard_index_;
         request.shard_datum_index = shard_next_datum_[next_shard_index_]++;
+        requests.push_back(request);
+    }
 
+    prefill_inflight_ += (uint32_t)requests.size();
+
+    for (auto& request : requests) {
         pool_.QueueTask([this, request](int /*worker_index*/) {
             // Read offsets from mmap index file
             uint32_t bytes = 0;
@@ -258,28 +271,23 @@ void TokenizedDataLoader::Prefill() {
             shards_[request.shard_index]->DataFile->Read(offset, bytes,
                 [this, request](uint8_t* data, uint32_t bytes)
             {
-                if (epoch_ != request.epoch) {
-                    // Request has expired
-                    return;
-                }
-
-                auto& decompressor = decompressors_[request.prefill_dest_index];
+                auto& decompressor = decompressors_[request.batch_index];
                 if (!decompressor->Decompress(data, bytes, kCompressorByteStride)) {
                     std::cerr << "Failed to decompress data" << std::endl;
                     worker_error_ = true;
                     return;
                 }
 
-                // FIXME: This should be writing to the output buffer
+                uint32_t remaining = --prefill_inflight_;
+                if (remaining == 0) {
+                    // All prefill requests have completed
+                    std::unique_lock<std::mutex> lock(output_mutex_);
+                    output_condition_.notify_all();
+                }
             });
 
         });
     }
-}
-
-void TokenizedDataLoader::NextPrefill()
-{
-
 }
 
 bool TokenizedDataLoader::GetTokenArray(
@@ -291,11 +299,10 @@ bool TokenizedDataLoader::GetTokenArray(
     // Wait until output is ready
     {
         std::unique_lock<std::mutex> lock(output_mutex_);
-        output_condition_.wait(lock, [this]{ return Terminated || output_ready_; });
+        output_condition_.wait(lock, [this]{ return Terminated || prefill_inflight_ == 0; });
         if (Terminated) {
             return false;
         }
-        output_ready_ = false;
     }
 
     uint32_t max_token_count = 0;
@@ -343,7 +350,7 @@ bool TokenizedDataLoader::GetTokenArray(
     *micro_batch_out = num_rows;
     *max_tokens_out = max_token_count;
 
-    NextPrefill();
+    Prefill();
     return true;
 }
 
