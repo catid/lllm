@@ -36,8 +36,8 @@ protected:
 
     std::vector<TaskFn> Tasks;
 
-    std::mutex Lock;
-    std::condition_variable Condition;
+    std::mutex TaskLock, DoneLock;
+    std::condition_variable TaskCondition, DoneCondition;
 
     void Loop();
 };
@@ -63,5 +63,6 @@ public:
     void QueueTask(TaskFn task, int max_active_tasks = 0);
 
 private:
+    std::mutex Lock;
     std::vector<std::shared_ptr<ThreadWorker>> Workers;
 };

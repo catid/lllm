@@ -47,6 +47,7 @@ python -m dataset.download_dataset
 * Additional residual skip connections
 * Gradually increasing dimension through the model
 * Share the majority of FFN weights between consecutive layers but only replace a few of them each time
+* Spend a layer to drop tokens at KV cache point (mask for second half)
 
 # TODO
 

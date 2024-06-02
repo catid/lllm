@@ -21,8 +21,12 @@ ThreadWorker::~ThreadWorker()
 {
     Terminated = true;
     {
-        std::unique_lock<std::mutex> lock(Lock);
-        Condition.notify_one();
+        std::unique_lock<std::mutex> lock(TaskLock);
+        TaskCondition.notify_all();
+    }
+    {
+        std::unique_lock<std::mutex> lock(DoneLock);
+        DoneCondition.notify_all();
     }
     JoinThread(Thread);
     Thread = nullptr;
@@ -34,12 +38,13 @@ void ThreadWorker::Loop()
         set_thread_affinity(CpuIdAffinity);
     }
 
-    while (!Terminated) {
-        std::vector<TaskFn> todo;
+    std::vector<TaskFn> todo;
 
+    while (!Terminated) {
+        // Wait for new work to be submitted
         {
-            std::unique_lock<std::mutex> lock(Lock);
-            Condition.wait(lock, [this]{ return Terminated || Tasks.size() > 0; });
+            std::unique_lock<std::mutex> lock(TaskLock);
+            TaskCondition.wait(lock, [this]{ return Terminated || Tasks.size() > 0; });
             if (Terminated) {
                 break;
             }
@@ -53,22 +58,27 @@ void ThreadWorker::Loop()
             }
             --ActiveTasks;
         }
+        todo.clear();
+
+        // Notify all waiting threads that new work can be submitted
+        {
+            std::unique_lock<std::mutex> lock(DoneLock);
+            DoneCondition.notify_all();
+        }
     }
 }
 
 void ThreadWorker::QueueTask(TaskFn task)
 {
-    std::unique_lock<std::mutex> lock(Lock);
+    std::unique_lock<std::mutex> lock(TaskLock);
     ++ActiveTasks;
     Tasks.emplace_back(std::move(task));
-    Condition.notify_one();
+    TaskCondition.notify_all();
 }
 
-void ThreadWorker::WaitForTasks(int max_active_tasks)
-{
-    while (!Terminated && ActiveTasks > max_active_tasks) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+void ThreadWorker::WaitForTasks(int max_active_tasks) {
+    std::unique_lock<std::mutex> lock(DoneLock);
+    DoneCondition.wait(lock, [this, max_active_tasks]{ return Terminated || ActiveTasks <= max_active_tasks; });
 }
 
 
@@ -77,6 +87,8 @@ void ThreadWorker::WaitForTasks(int max_active_tasks)
 
 void WorkerPool::Start(int worker_count, bool use_thread_affinity)
 {
+    std::lock_guard<std::mutex> lock(Lock);
+
     const int num_logical_cores = std::thread::hardware_concurrency();
     if (worker_count <= 0) {
         worker_count = num_logical_cores;
@@ -103,11 +115,15 @@ void WorkerPool::Start(int worker_count, bool use_thread_affinity)
 
 void WorkerPool::Stop()
 {
+    std::lock_guard<std::mutex> lock(Lock);
+
     Workers.clear();
 }
 
 void WorkerPool::WaitForTasks()
 {
+    std::lock_guard<std::mutex> lock(Lock);
+
     for (auto& worker : Workers) {
         worker->WaitForTasks();
     }
@@ -115,12 +131,14 @@ void WorkerPool::WaitForTasks()
 
 void WorkerPool::QueueTask(TaskFn task, int max_active_tasks)
 {
-    // Find the least busy worker.
-    int best_active_tasks = -1;
-    int best_i = -1;
+    std::lock_guard<std::mutex> lock(Lock);
 
     for (;;) {
-        for (int i = 0; i < Workers.size(); ++i) {
+        // Find the least busy worker.
+        int best_active_tasks = -1;
+        int best_i = -1;
+
+        for (int i = 0; i < (int)Workers.size(); ++i) {
             int active_tasks = Workers[i]->GetActiveTaskCount();
 
             // Any idle worker is fine.
@@ -135,15 +153,14 @@ void WorkerPool::QueueTask(TaskFn task, int max_active_tasks)
             }
         }
 
-        if (max_active_tasks <= 0 || best_active_tasks < max_active_tasks) {
-            break;
+        // If there is no limit (0) or the best worker has fewer than the limit:
+        if (max_active_tasks == 0 || best_active_tasks < max_active_tasks) {
+            // Queue the task on the best worker
+            Workers[best_i]->QueueTask(task);
+            return;
         }
 
         // Wait and try to find a less busy worker
         std::this_thread::sleep_for(std::chrono::milliseconds(10 + rand() % 10));
-    }
-
-    if (best_i != -1) {
-        Workers[best_i]->QueueTask(task);
     }
 }
