@@ -119,18 +119,16 @@ public:
         to implement RHO-loss, so this is fine for now.
     */
     void StartEpoch(
-        uint64_t seed0,
-        uint64_t seed1,
-        uint32_t micro_batch_size,
-        uint32_t context_size,
-        uint32_t data_stride);
+        uint64_t seed0, uint64_t seed1, // random seed for shuffling (synchronzed between nodes)
+        uint32_t micro_batch_size, // max size of a microbatch
+        uint32_t context_size); // max size of a context
 
     // Get the next microbatch of tokens.
     bool GetTokenArray(
-        uint32_t* micro_batch_size,
-        uint32_t* num_tokens,
-        uint32_t* output_batch,
-        uint8_t* is_continuation);
+        uint32_t* micro_batch_size, // output: batch size
+        uint32_t* num_tokens, // output: number of tokens in the batch
+        uint32_t* output_batch, // output: tensor of tokens
+        uint8_t* is_continuation); // output: vector of bools, one for each batch
 
 private:
     std::atomic<bool> Terminated = ATOMIC_VAR_INIT(false);

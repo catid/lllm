@@ -181,14 +181,12 @@ void TokenizedDataLoader::StartEpoch(
     uint64_t seed0,
     uint64_t seed1,
     uint32_t micro_batch_size,
-    uint32_t context_size,
-    uint32_t data_stride)
+    uint32_t context_size)
 {
     LOG_INFO() << "Epoch starting with " << micro_batch_size << " microbatches of " << context_size << " tokens each";
 
     micro_batch_size_ = micro_batch_size;
     context_size_ = context_size;
-    data_stride_ = data_stride;
 
     ResetPrefill();
 

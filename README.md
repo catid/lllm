@@ -47,6 +47,8 @@ python -m dataset.download_dataset
 * Spend a layer to drop tokens at KV cache point (mask for second half) per token
 * Mixture of Depth (MoD)
 * RWKV-6 for first half, Mix GLA and 20% Full attention for second half of YOCO
+* ReMoRa with Sophia optimizer https://github.com/Liuhong99/Sophia/blob/main/sophia.py
+* Speedup https://github.com/Liuhong99/Sophia/pull/35
 
 # TODO
 
