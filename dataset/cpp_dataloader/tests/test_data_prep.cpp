@@ -1,5 +1,7 @@
 #include <tokenized_data_prep.hpp>
 
+#include "tools.hpp"
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -40,14 +42,14 @@ bool testTokenizedDataPrep() {
     // Write tokenized text data
     for (const auto& tokenized_text : tokenized_texts) {
         if (!data_prep.WriteTokenizedText(tokenized_text.data(), tokenized_text.size())) {
-            std::cout << "Failed to write tokenized text" << std::endl;
+            LOG_ERROR() << "Failed to write tokenized text";
             return false;
         }
     }
 
     // Finalize data preparation
     if (!data_prep.Stop()) {
-        std::cout << "Failed to finalize data preparation" << std::endl;
+        LOG_ERROR() << "Failed to finalize data preparation";
         return false;
     }
 
@@ -58,7 +60,7 @@ bool testTokenizedDataPrep() {
     std::ifstream index_file("test_data/index_0.bin", std::ios::binary);
 
     if (!data_file || !index_file) {
-        std::cout << "Failed to open generated files" << std::endl;
+        LOG_ERROR() << "Failed to open generated files";
         return false;
     }
 
@@ -93,15 +95,18 @@ int main() {
     const std::string directory_path = "test_data";
 
     if (!create_directory(directory_path)) {
-        std::cout << "Failed to create test directory" << std::endl;
+        LOG_ERROR() << "Failed to create test directory";
         return -1;
     }
 
-    if (testTokenizedDataPrep()) {
-        std::cout << "TokenizedDataPrep test passed" << std::endl;
-        return 0;
-    } else {
-        std::cout << "TokenizedDataPrep test failed" << std::endl;
+    if (!testTokenizedDataPrep()) {
+        LOG_ERROR() << "TokenizedDataPrep test failed";
         return -1;
+    } else {
+        LOG_INFO() << "TokenizedDataPrep test passed";
     }
+
+    LOG_INFO() << "All tests passed";
+
+    return 0;
 }

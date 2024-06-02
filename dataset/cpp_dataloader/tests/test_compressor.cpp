@@ -1,8 +1,9 @@
 #include <compressor.hpp>
 
+#include "tools.hpp"
+
 #include <cstdlib>
 #include <cstdint>
-#include <iostream>
 #include <string>
 #include <vector>
 #include <string.h>
@@ -24,7 +25,7 @@ bool AreVectorsEqual(const std::vector<T>& v1, const std::vector<T>& v2) {
 }
 
 // Test case for compressing and decompressing a string
-void TestCompressDecompressString() {
+bool TestCompressDecompressString() {
     Compressor compressor;
     Decompressor decompressor;
 
@@ -34,8 +35,8 @@ void TestCompressDecompressString() {
     bool compress_result = compressor.Compress(original.data(), original.size());
 
     if (!compress_result) {
-        std::cout << "TestCompressDecompressString: Compression failed" << std::endl;
-        return;
+        LOG_ERROR() << "TestCompressDecompressString: Compression failed";
+        return false;
     }
 
     // Get the compressed data
@@ -45,8 +46,8 @@ void TestCompressDecompressString() {
     bool decompress_result = decompressor.Decompress(compressed_data.data(), compressed_data.size());
 
     if (!decompress_result) {
-        std::cout << "TestCompressDecompressString: Decompression failed" << std::endl;
-        return;
+        LOG_ERROR() << "TestCompressDecompressString: Decompression failed";
+        return false;
     }
 
     // Get the decompressed data
@@ -57,15 +58,16 @@ void TestCompressDecompressString() {
 
     // Check if the decompressed string matches the original string
     if (original != decompressed_string) {
-        std::cout << "TestCompressDecompressString: Decompressed string does not match the original" << std::endl;
-        return;
+        LOG_ERROR() << "TestCompressDecompressString: Decompressed string does not match the original";
+        return false;
     }
 
-    std::cout << "TestCompressDecompressString: Passed" << std::endl;
+    LOG_INFO() << "TestCompressDecompressString: Passed";
+    return true;
 }
 
 // Test case for compressing and decompressing a vector of integers
-void TestCompressDecompressVector() {
+bool TestCompressDecompressVector() {
     Compressor compressor;
     Decompressor decompressor;
 
@@ -75,8 +77,8 @@ void TestCompressDecompressVector() {
     bool compress_result = compressor.Compress(original.data(), original.size() * sizeof(int));
 
     if (!compress_result) {
-        std::cout << "TestCompressDecompressVector: Compression failed" << std::endl;
-        return;
+        LOG_ERROR() << "TestCompressDecompressVector: Compression failed";
+        return false;
     }
 
     // Get the compressed data
@@ -86,8 +88,8 @@ void TestCompressDecompressVector() {
     bool decompress_result = decompressor.Decompress(compressed_data.data(), compressed_data.size());
 
     if (!decompress_result) {
-        std::cout << "TestCompressDecompressVector: Decompression failed" << std::endl;
-        return;
+        LOG_ERROR() << "TestCompressDecompressVector: Decompression failed";
+        return false;
     }
 
     // Get the decompressed data
@@ -99,15 +101,16 @@ void TestCompressDecompressVector() {
 
     // Check if the decompressed vector matches the original vector
     if (!AreVectorsEqual(original, decompressed_vector)) {
-        std::cout << "TestCompressDecompressVector: Decompressed vector does not match the original" << std::endl;
-        return;
+        LOG_ERROR() << "TestCompressDecompressVector: Decompressed vector does not match the original";
+        return false;
     }
 
-    std::cout << "TestCompressDecompressVector: Passed" << std::endl;
+    LOG_INFO() << "TestCompressDecompressVector: Passed";
+    return true;
 }
 
 // Test case for compressing and decompressing with different byte strides
-void TestCompressDecompressByteStride() {
+bool TestCompressDecompressByteStride() {
     Compressor compressor;
     Decompressor decompressor;
 
@@ -123,8 +126,8 @@ void TestCompressDecompressByteStride() {
         // Compress the data with the current byte stride
         bool compress_result = compressor.Compress(original_data.data(), original_data.size(), byte_stride);
         if (!compress_result) {
-            std::cout << "TestCompressDecompressByteStride: Compression failed for byte_stride " << byte_stride << std::endl;
-            return;
+            LOG_ERROR() << "TestCompressDecompressByteStride: Compression failed for byte_stride " << byte_stride;
+            return false;
         }
 
         // Get the compressed data
@@ -133,8 +136,8 @@ void TestCompressDecompressByteStride() {
         // Decompress the compressed data with the same byte stride
         bool decompress_result = decompressor.Decompress(compressed_data.data(), compressed_data.size(), byte_stride);
         if (!decompress_result) {
-            std::cout << "TestCompressDecompressByteStride: Decompression failed for byte_stride " << byte_stride << std::endl;
-            return;
+            LOG_ERROR() << "TestCompressDecompressByteStride: Decompression failed for byte_stride " << byte_stride;
+            return false;
         }
 
         // Get the decompressed data
@@ -142,18 +145,28 @@ void TestCompressDecompressByteStride() {
 
         // Check if the decompressed data matches the original data
         if (!AreVectorsEqual(original_data, decompressed_data)) {
-            std::cout << "TestCompressDecompressByteStride: Decompressed data does not match the original for byte_stride " << byte_stride << std::endl;
-            return;
+            LOG_ERROR() << "TestCompressDecompressByteStride: Decompressed data does not match the original for byte_stride " << byte_stride;
+            return false;
         }
     }
 
-    std::cout << "TestCompressDecompressByteStride: Passed" << std::endl;
+    LOG_INFO() << "TestCompressDecompressByteStride: Passed";
+    return true;
 }
 
 int main() {
-    TestCompressDecompressString();
-    TestCompressDecompressVector();
-    TestCompressDecompressByteStride();
+    if (!TestCompressDecompressString()) {
+        return -1;
+    }
 
+    if (!TestCompressDecompressVector()) {
+        return -1;
+    }
+
+    if (!TestCompressDecompressByteStride()) {
+        return -1;
+    }
+
+    LOG_INFO() << "All tests passed";
     return 0;
 }

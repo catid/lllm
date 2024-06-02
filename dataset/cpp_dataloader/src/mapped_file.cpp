@@ -1,5 +1,7 @@
 #include "mapped_file.hpp"
 
+#include "tools.hpp"
+
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -12,11 +14,13 @@
 bool MappedFileReader::Open(const std::string& name) {
     fd_ = open(name.c_str(), O_RDONLY);
     if (fd_ == -1) {
+        LOG_ERROR() << "MappedFileReader: Failed to open file: " << name;
         return false;
     }
 
     struct stat sb;
     if (fstat(fd_, &sb) == -1) {
+        LOG_ERROR() << "MappedFileReader: Failed to stat file: " << name;
         close(fd_);
         return false;
     }

@@ -3,8 +3,6 @@
 #include <city.h>
 #include <cpppath.h>
 
-#include <iostream>
-
 
 //------------------------------------------------------------------------------
 // CompressorContext
@@ -19,7 +17,7 @@ bool CompressorContext::WriteTokenizedText(
         text_length * sizeof(uint32_t),
         kCompressorByteStride);
     if (!r) {
-        std::cerr << "Compression failed" << std::endl;
+        LOG_ERROR() << "Compression failed";
         return false;
     }
 
@@ -29,7 +27,7 @@ bool CompressorContext::WriteTokenizedText(
         current_index_.open(index_file_path_, std::ios::binary);
         current_file_.open(data_file_path_, std::ios::binary);
         if (!current_index_ || !current_file_) {
-            std::cerr << "Failed to open files: " << index_file_path_ << ", " << data_file_path_ << std::endl;
+            LOG_ERROR() << "Failed to open files: " << index_file_path_ << ", " << data_file_path_;
             return false;
         }
     }
@@ -46,7 +44,7 @@ bool CompressorContext::WriteTokenizedText(
     current_file_hash_ ^= CityHash64(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size());
 
     if (current_file_.fail() || current_index_.fail()) {
-        std::cerr << "Failed to write to files" << std::endl;
+        LOG_ERROR() << "Failed to write to files";
         return false;
     }
 
@@ -86,7 +84,7 @@ bool CompressorContext::FinishCurrentFile()
     current_index_.write(index_hash_buffer, sizeof(index_hash_buffer));
 
     if (current_file_.fail() || current_index_.fail()) {
-        std::cerr << "Failed to write tail on files" << std::endl;
+        LOG_ERROR() << "Failed to write tail on files";
         return false;
     }
 
@@ -145,7 +143,7 @@ bool TokenizedDataPrep::WriteTokenizedText(
             buffer->text.size(),
             on_file_start);
         if (!r) {
-            std::cerr << "Worker encountered an error" << std::endl;
+            LOG_ERROR() << "Worker encountered an error";
             worker_error_ = true;
         }
         allocator_.Free(buffer);
@@ -174,7 +172,7 @@ bool TokenizedDataPrep::Stop() {
 
     std::ofstream global_index_file(index_file_path);
     if (!global_index_file.is_open()) {
-        std::cerr << "Failed to open index file: " << index_file_path << std::endl;
+        LOG_ERROR() << "Failed to open index file: " << index_file_path;
         return false;
     }
 

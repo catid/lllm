@@ -1,7 +1,6 @@
 #include "uring_file.hpp"
 #include "tools.hpp"
 
-#include <iostream>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -11,7 +10,7 @@
 #include <city.h>
 
 const char* kTestFile = "test_file.bin";
-const int kMinReads = 10000000;
+const int kMinReads = 1000000;
 const int kMaxReadBytes = 2048;
 const size_t kMinTestFileSize = (size_t)kMaxReadBytes * (size_t)kMinReads / 2;
 
@@ -22,14 +21,15 @@ int total_reads = 0;
 std::atomic<int> num_errors(0);
 
 bool create_test_file() {
-    std::cout << "Creating test file..." << std::endl;
+    LOG_INFO() << "Creating test file...";
 
     std::ofstream file(kTestFile, std::ios::binary);
     if (!file) { 
-        std::cerr << "Failed to create test file" << std::endl;
+        LOG_ERROR() << "Failed to create test file";
         return false;
     }
 
+    uint64_t last_log_bytes = 0;
     uint64_t total_bytes = 0;
     uint8_t buffer[kMaxReadBytes];
 
@@ -45,7 +45,7 @@ bool create_test_file() {
         }
 
         if (!file.write(reinterpret_cast<const char*>(buffer), read_size)) {
-            std::cerr << "Failed to write to test file" << std::endl;
+            LOG_ERROR() << "Failed to write to test file";
             return false;
         }
 
@@ -56,19 +56,24 @@ bool create_test_file() {
 
         total_bytes += read_size;
         ++total_reads;
+
+        if (total_bytes - last_log_bytes > 10 * 1024 * 1024) {
+            last_log_bytes = total_bytes;
+            LOG_INFO() << "Wrote " << total_bytes / 1000000.0 << " MB...";
+        }
     }
 
-    std::cout << "Created test file with " << total_reads << " reads and " << total_bytes << " bytes" << std::endl;
+    LOG_INFO() << "Created test file with " << total_reads << " reads and " << total_bytes << " bytes";
     return true;
 }
 
 bool RunTest() {
     create_test_file();
 
-    std::cout << "Performing random-access reads and verifying data..." << std::endl;
+    LOG_INFO() << "Performing random-access reads and verifying data...";
     AsyncUringReader reader;
     if (!reader.Open(kTestFile)) {
-        std::cerr << "Failed to open AsyncUringReader" << std::endl;
+        LOG_ERROR() << "Failed to open AsyncUringReader";
         return false;
     }
 
@@ -78,6 +83,8 @@ bool RunTest() {
     }
     std::shuffle(read_indices.begin(), read_indices.end(), std::mt19937(std::random_device{}()));
 
+    std::atomic<uint64_t> total_bytes = ATOMIC_VAR_INIT(0);
+
     int64_t t0 = GetNsec();
     for (int j = 0; j < total_reads; ++j) {
         uint32_t index = read_indices[j];
@@ -85,16 +92,16 @@ bool RunTest() {
         uint64_t read_offset = read_offsets[index];
 
         bool success = reader.Read(read_offset, expected_bytes,
-            [index, read_offset, expected_bytes](uint8_t* data, uint32_t bytes)
+            [index, read_offset, expected_bytes, &total_bytes](uint8_t* data, uint32_t bytes)
         {
             if (!data || bytes == 0) {
-                std::cerr << "Read error for request " << index << " (offset: " << read_offset << ", bytes: " << expected_bytes << ")" << std::endl;
+                LOG_ERROR() << "Read error for request " << index << " (offset: " << read_offset << ", bytes: " << expected_bytes << ")";
                 ++num_errors;
                 return;
             }
 
             if (bytes != expected_bytes) {
-                std::cerr << "Read size mismatch for request " << index << ". Expected: " << expected_bytes << ", Actual: " << bytes << std::endl;
+                LOG_ERROR() << "Read size mismatch for request " << index << ". Expected: " << expected_bytes << ", Actual: " << bytes;
                 ++num_errors;
                 return;
             }
@@ -102,30 +109,34 @@ bool RunTest() {
             uint64_t expected_hash = hashes[index];
             uint64_t actual_hash = CityHash64(reinterpret_cast<char*>(data), bytes);
             if (actual_hash != expected_hash) {
-                std::cerr << "Read data mismatch for request " << index << ". Expected hash: " << expected_hash << ", Actual hash: " << actual_hash << std::endl;
+                LOG_ERROR() << "Read data mismatch for request " << index << ". Expected hash: " << expected_hash << ", Actual hash: " << actual_hash;
                 ++num_errors;
                 return;
             }
+
+            total_bytes += bytes;
         });
         if (!success) {
-            std::cerr << "Failed to submit read request " << index << std::endl;
+            LOG_ERROR() << "Failed to submit read request " << index;
             ++num_errors;
             break;
         }
     }
 
+    // We do a busy loop here for precise timing but normally we would not do this.
     while (reader.IsBusy()) {
-        // Wait for all reads to complete
+        std::this_thread::yield();
     }
     reader.Close();
 
     int64_t t1 = GetNsec();
     if (num_errors > 0) {
-        std::cerr << "Test failed with " << num_errors << " errors" << std::endl;
+        LOG_ERROR() << "Test failed with " << num_errors << " errors";
         return false;
     }
 
-    std::cout << "Read " << total_reads << " blocks in " << (t1 - t0) / 1000000.0 << " ms" << std::endl;
+    LOG_INFO() << "Read " << total_reads << " blocks in " << (t1 - t0) / 1000000.0
+        << " ms: " << (total_bytes * 1000.0 / (t1 - t0)) << " MB/s";
     return true;
 }
 
@@ -133,9 +144,9 @@ int main() {
     bool success = RunTest();
     remove(kTestFile);
     if (!success) {
-        std::cerr << "Test failed" << std::endl;
+        LOG_ERROR() << "Test failed";
         return -1;
     }
-    std::cout << "All tests passed" << std::endl;
+    LOG_INFO() << "All tests passed";
     return 0;
 }

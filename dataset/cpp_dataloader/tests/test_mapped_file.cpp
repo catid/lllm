@@ -1,29 +1,30 @@
 #include <mapped_file.hpp>
 
+#include "tools.hpp"
+
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
-#include <iostream>
 #include <string>
 #include <cstring>
 
 // Test case for opening and reading a mapped file
-void TestOpenAndReadFile() {
+bool TestOpenAndReadFile() {
     const std::string file_name = "test_file.txt";
     const std::string content = "Hello, World!";
 
     // Create a file and write content to it
     int fd = open(file_name.c_str(), O_CREAT | O_RDWR, 0666);
     if (fd == -1) {
-        std::cout << "TestOpenAndReadFile: Failed to create file" << std::endl;
-        return;
+        LOG_ERROR() << "TestOpenAndReadFile: Failed to create file";
+        return false;
     }
 
     if (write(fd, content.data(), content.size()) != static_cast<ssize_t>(content.size())) {
-        std::cout << "TestOpenAndReadFile: Failed to write content to file" << std::endl;
+        LOG_ERROR() << "TestOpenAndReadFile: Failed to write content to file";
         close(fd);
-        return;
+        return false;
     }
 
     close(fd);
@@ -33,15 +34,15 @@ void TestOpenAndReadFile() {
     bool open_result = reader.Open(file_name);
 
     if (!open_result) {
-        std::cout << "TestOpenAndReadFile: Failed to open mapped file" << std::endl;
-        return;
+        LOG_ERROR() << "TestOpenAndReadFile: Failed to open mapped file";
+        return false;
     }
 
     // Check if the content of the mapped file matches the original content
     if (reader.GetSize() != content.size() || std::memcmp(reader.GetData(), content.data(), content.size()) != 0) {
-        std::cout << "TestOpenAndReadFile: Content of the mapped file does not match the original" << std::endl;
+        LOG_ERROR() << "TestOpenAndReadFile: Content of the mapped file does not match the original";
         reader.Close();
-        return;
+        return false;
     }
 
     reader.Close();
@@ -49,11 +50,15 @@ void TestOpenAndReadFile() {
     // Clean up the file
     unlink(file_name.c_str());
 
-    std::cout << "TestOpenAndReadFile: Passed" << std::endl;
+    LOG_INFO() << "TestOpenAndReadFile: Passed";
+    return true;
 }
 
 int main() {
-    TestOpenAndReadFile();
+    if (!TestOpenAndReadFile()) {
+        return -1;
+    }
 
+    LOG_INFO() << "All tests passed";
     return 0;
 }

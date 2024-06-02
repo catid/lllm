@@ -1,6 +1,5 @@
 #include <tools.hpp>
 
-#include <iostream>
 #include <cstring>
 
 bool testAllocateAndFree() {
@@ -33,6 +32,7 @@ bool testAllocateAndFree() {
     // Free the buffer again
     allocator.Free(buffer2);
 
+    LOG_INFO() << "testAllocateAndFree: passed";
     return true;
 }
 
@@ -61,6 +61,7 @@ bool testAllocateMultiple() {
     allocator.Free(buffer1);
     allocator.Free(buffer2);
 
+    LOG_INFO() << "testAllocateMultiple: passed";
     return true;
 }
 
@@ -90,29 +91,26 @@ bool testFreeMultiple() {
     // Free the buffer
     allocator.Free(buffer3);
 
+    LOG_INFO() << "testFreeMultiple: passed";
     return true;
 }
 
 int main() {
-    bool testResult1 = testAllocateAndFree();
-    bool testResult2 = testAllocateMultiple();
-    bool testResult3 = testFreeMultiple();
-
-    if (!testResult1) {
-        std::cout << "testAllocateAndFree failed" << std::endl;
+    if (!testAllocateAndFree()) {
+        LOG_ERROR() << "testAllocateAndFree failed";
         return -1;
     }
 
-    if (!testResult2) {
-        std::cout << "testAllocateMultiple failed" << std::endl;
+    if (!testAllocateMultiple()) {
+        LOG_ERROR() << "testAllocateMultiple failed";
         return -1;
     }
 
-    if (!testResult3) {
-        std::cout << "testFreeMultiple failed" << std::endl;
+    if (!testFreeMultiple()) {
+        LOG_ERROR() << "testFreeMultiple failed";
         return -1;
     }
 
-    std::cout << "All tests passed" << std::endl;
+    LOG_INFO() << "All tests passed";
     return 0;
 }

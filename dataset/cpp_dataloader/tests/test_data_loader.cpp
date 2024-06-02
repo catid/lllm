@@ -1,23 +1,20 @@
 #include <tokenized_data_loader.hpp>
 
-#include <iostream>
-#include <cstdint>
-#include <cstring>
-#include <random>
-#include <string>
-#include <vector>
-#include <fstream>
+#include "tools.hpp"
 
 bool test_data_verify() {
     return data_verify("test_data");
 }
 
 int main() {
-    if (test_data_verify()) {
-        std::cout << "test_data_verify test passed" << std::endl;
-        return 0;
-    } else {
-        std::cout << "test_data_verify test failed" << std::endl;
+    if (!test_data_verify()) {
+        LOG_ERROR() << "test_data_verify test failed";
         return -1;
+    } else {
+        LOG_INFO() << "test_data_verify test passed";
     }
+
+    LOG_INFO() << "All tests passed";
+
+    return 0;
 }

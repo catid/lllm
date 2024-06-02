@@ -58,20 +58,20 @@ bool DataShardContext::Open(
 {
     std::shared_ptr<AsyncUringReader> data_reader = std::make_shared<AsyncUringReader>();
     if (!data_reader->Open(data_file_path)) {
-        std::cout << "Failed to open data file at " << data_file_path << std::endl;
+        LOG_INFO() << "Failed to open data file at " << data_file_path;
         return false;
     }
 
     std::shared_ptr<MappedFileReader> index_reader = std::make_shared<MappedFileReader>();
     if (!index_reader->Open(index_file_path)) {
-        std::cout << "Failed to open index file at " << index_file_path << std::endl;
+        LOG_INFO() << "Failed to open index file at " << index_file_path;
         return false;
     }
 
     uint64_t index_file_bytes = index_reader->GetSize();
     uint64_t num_spans = (index_file_bytes - 8) / sizeof(uint32_t) - 1;
     if (num_spans > UINT32_MAX) {
-        std::cout << "Too many regions in index file at " << index_file_path << std::endl;
+        LOG_INFO() << "Too many regions in index file at " << index_file_path;
         return false;
     }
 
@@ -124,7 +124,7 @@ bool TokenizedDataLoader::Start(const std::string& data_folder_path) {
 
     global_index_yaml_ = std::make_shared<GlobalIndexYaml>();
     if (!global_index_yaml_->Read(data_folder_path)) {
-        std::cout << "Failed to read global index file at " << data_folder_path << std::endl;
+        LOG_INFO() << "Failed to read global index file at " << data_folder_path;
         return false;
     }
 
@@ -150,7 +150,7 @@ bool TokenizedDataLoader::Start(const std::string& data_folder_path) {
                 return;
             }
             if (!shard->Open(data_file_path, index_file_path)) {
-                std::cout << "Failed to open data file at " << data_file_path << std::endl;
+                LOG_INFO() << "Failed to open data file at " << data_file_path;
                 worker_error_ = true;
             }
         });
@@ -160,7 +160,7 @@ bool TokenizedDataLoader::Start(const std::string& data_folder_path) {
     pool_.WaitForTasks();
 
     if (worker_error_) {
-        std::cout << "Failed to open all data files" << std::endl;
+        LOG_INFO() << "Failed to open all data files";
         return false;
     }
 
@@ -184,7 +184,7 @@ void TokenizedDataLoader::StartEpoch(
     uint32_t context_size,
     uint32_t data_stride)
 {
-    std::cout << "Epoch starting with " << micro_batch_size << " microbatches of " << context_size << " tokens each" << std::endl;
+    LOG_INFO() << "Epoch starting with " << micro_batch_size << " microbatches of " << context_size << " tokens each";
 
     micro_batch_size_ = micro_batch_size;
     context_size_ = context_size;
@@ -233,10 +233,10 @@ void TokenizedDataLoader::ResetPrefill()
 }
 
 void TokenizedDataLoader::Prefill() {
-    std::cout << "Shuffle complete.  Prefilling " << micro_batch_size_ << "..." << std::endl;
+    LOG_INFO() << "Shuffle complete.  Prefilling " << micro_batch_size_ << "...";
 
     if (prefill_inflight_ > 0) {
-        std::cerr << "Internal error: Prefill still inflight" << std::endl; 
+        LOG_ERROR() << "Internal error: Prefill still inflight"; 
         return;
     }
 
@@ -273,7 +273,7 @@ void TokenizedDataLoader::Prefill() {
             {
                 auto& decompressor = decompressors_[request.batch_index];
                 if (!decompressor->Decompress(data, bytes, kCompressorByteStride)) {
-                    std::cerr << "Failed to decompress data" << std::endl;
+                    LOG_ERROR() << "Failed to decompress data";
                     worker_error_ = true;
                     return;
                 }
@@ -364,7 +364,7 @@ bool verify_files(
 {
     MappedFileReader index_reader;
     if (!index_reader.Open(index_file_path)) {
-        std::cout << "Failed to open index file: " << index_file_path << std::endl;
+        LOG_INFO() << "Failed to open index file: " << index_file_path;
         return false;
     }
 
@@ -376,7 +376,7 @@ bool verify_files(
 
     MappedFileReader data_reader;
     if (!data_reader.Open(data_file_path)) {
-        std::cout << "Failed to open data file: " << data_file_path << std::endl;
+        LOG_INFO() << "Failed to open data file: " << data_file_path;
         return false;
     }
 
@@ -389,7 +389,7 @@ bool verify_files(
         uint32_t start = read_uint32_le(current_offset_buffer - 4);
         uint32_t end = read_uint32_le(current_offset_buffer);
         if (end <= start) {
-            std::cout << "Invalid offset: " << current_offset_buffer << std::endl;
+            LOG_INFO() << "Invalid offset: " << current_offset_buffer;
             return false;
         }
         uint32_t bytes = end - start;
@@ -400,12 +400,12 @@ bool verify_files(
     }
 
     if (index_hash != 0) {
-        std::cout << "Index file is corrupted: " << index_file_path << std::endl;
+        LOG_INFO() << "Index file is corrupted: " << index_file_path;
         return false;
     }
 
     if (data_hash != 0) {
-        std::cout << "Data file is corrupted: " << data_file_path << std::endl;
+        LOG_INFO() << "Data file is corrupted: " << data_file_path;
         return false;
     }
 
@@ -416,7 +416,7 @@ bool data_verify(const std::string& data_folder_path)
 {
     GlobalIndexYaml global_index_yaml;
     if (!global_index_yaml.Read(data_folder_path)) {
-        std::cout << "Failed to read global index file at " << data_folder_path << std::endl;
+        LOG_INFO() << "Failed to read global index file at " << data_folder_path;
         return false;
     }
 
@@ -442,12 +442,12 @@ bool data_verify(const std::string& data_folder_path)
                 data_error = true;
             }
             const int count = files_verified++;
-            if (count % 10 == 0) {
+            if (count % 10 == 1) {
                 uint64_t t1 = GetNsec();
                 double seconds_elapsed = (t1 - t0) / 1000000000.0;
                 double seconds_remaining = seconds_elapsed / count * (num_files - count);
-                std::cout << "Verified " << count << "/" << num_files << " files in "
-                    << seconds_elapsed << " seconds (" << seconds_remaining << " remaining)" << std::endl;
+                LOG_INFO() << "Verified " << count << "/" << num_files << " files in "
+                    << seconds_elapsed << " seconds (" << seconds_remaining << " remaining)";
             }
         }, max_active_tasks);
 
@@ -460,7 +460,7 @@ bool data_verify(const std::string& data_folder_path)
     pool.Stop();
 
     if (data_error) {
-        std::cout << "Data verification failed" << std::endl;
+        LOG_INFO() << "Data verification failed";
         return false;
     }
 

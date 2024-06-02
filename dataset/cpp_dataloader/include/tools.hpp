@@ -6,6 +6,83 @@
 #include <mutex>
 #include <atomic>
 #include <thread>
+#include <condition_variable>
+#include <string>
+#include <functional>
+#include <sstream>
+
+
+//------------------------------------------------------------------------------
+// Logger
+
+enum class LogLevel { DEBUG, INFO, WARN, ERROR };
+
+class Logger {
+public:
+    static Logger& getInstance();
+
+    Logger();
+    ~Logger();
+
+    void SetLogLevel(LogLevel level);
+    void SetCallback(std::function<void(LogLevel, const std::string&)> callback);
+
+    class LogStream {
+    public:
+        LogStream(Logger& logger, LogLevel level) : logger_(logger), level_(level) {}
+        LogStream(const LogStream&& other) : logger_(other.logger_), level_(other.level_) {}
+        ~LogStream() {
+            logger_.Log(level_, std::move(ss_));
+        }
+
+        template<typename T>
+        LogStream& operator<<(const T& value) {
+            ss_ << value;
+            return *this;
+        }
+
+    private:
+        Logger& logger_;
+        LogLevel level_;
+        std::ostringstream ss_;
+    };
+
+    LogStream Debug() { return LogStream(*this, LogLevel::DEBUG); }
+    LogStream Info() { return LogStream(*this, LogLevel::INFO); }
+    LogStream Warn() { return LogStream(*this, LogLevel::WARN); }
+    LogStream Error() { return LogStream(*this, LogLevel::ERROR); }
+
+    void Terminate();
+
+private:
+    static std::unique_ptr<Logger> Instance;
+    static std::once_flag InitInstanceFlag;
+
+    struct LogEntry {
+        LogLevel Level;
+        std::string Message;
+    };
+
+    std::vector<LogEntry> LogQueue;
+    std::mutex LogQueueMutex;
+    std::condition_variable LogQueueCV;
+
+    std::thread LoggerThread;
+    LogLevel CurrentLogLevel;
+    std::function<void(LogLevel, const std::string&)> Callback;
+
+    std::atomic<bool> Terminated;
+
+    void Log(LogLevel level, std::ostringstream&& message);
+    void RunLogger();
+    void ProcessLogQueue();
+};
+
+// Macros for logging
+#define LOG_DEBUG() Logger::getInstance().Debug()
+#define LOG_INFO() Logger::getInstance().Info()
+#define LOG_WARN() Logger::getInstance().Warn()
+#define LOG_ERROR() Logger::getInstance().Error()
 
 
 //------------------------------------------------------------------------------

@@ -1,13 +1,104 @@
 #include "tools.hpp"
 
-#include <cstring>
-#include <chrono>
-
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <pthread.h>
 #endif
+
+#include <cstring>
+#include <chrono>
+#include <iostream>
+
+
+//------------------------------------------------------------------------------
+// Logger
+
+// Initialize static members
+std::unique_ptr<Logger> Logger::Instance;
+std::once_flag Logger::InitInstanceFlag;
+
+Logger& Logger::getInstance() {
+    std::call_once(InitInstanceFlag, []() {
+        Instance.reset(new Logger);
+    });
+    return *Instance;
+}
+
+Logger::Logger() : CurrentLogLevel(LogLevel::INFO), Terminated(false) {
+    LoggerThread = std::thread(&Logger::RunLogger, this);
+}
+
+Logger::~Logger() {
+    Terminate();
+    if (LoggerThread.joinable()) {
+        LoggerThread.join();
+    }
+    ProcessLogQueue(); // Process any remaining logs
+}
+
+void Logger::SetLogLevel(LogLevel level) {
+    std::lock_guard<std::mutex> lock(LogQueueMutex);
+    CurrentLogLevel = level;
+}
+
+void Logger::SetCallback(std::function<void(LogLevel, const std::string&)> callback) {
+    Callback = callback;
+}
+
+void Logger::Log(LogLevel level, std::ostringstream&& message) {
+    std::lock_guard<std::mutex> lock(LogQueueMutex);
+    LogQueue.push_back({level, message.str()});
+    LogQueueCV.notify_one();
+}
+
+void Logger::Terminate() {
+    Terminated = true;
+    LogQueueCV.notify_one();
+}
+
+void Logger::RunLogger() {
+    while (!Terminated) {
+        std::unique_lock<std::mutex> lock(LogQueueMutex);
+        LogQueueCV.wait(lock, [this] { return !LogQueue.empty() || Terminated; });
+
+        if (!LogQueue.empty()) {
+            ProcessLogQueue();
+        }
+
+        if (Terminated) {
+            break;
+        }
+    }
+}
+
+void Logger::ProcessLogQueue() {
+    std::vector<LogEntry> logsToProcess;
+    logsToProcess.swap(LogQueue);
+
+    for (const auto& entry : logsToProcess) {
+        if (entry.Level >= CurrentLogLevel) {
+            if (Callback) {
+                Callback(entry.Level, entry.Message);
+            } else {
+                switch (entry.Level) {
+                    case LogLevel::DEBUG:
+                        std::cout << "[DEBUG] " << entry.Message << std::endl;
+                        break;
+                    case LogLevel::INFO:
+                        std::cout << "[INFO] " << entry.Message << std::endl;
+                        break;
+                    case LogLevel::WARN:
+                        std::cerr << "[WARN] " << entry.Message << std::endl;
+                        break;
+                    case LogLevel::ERROR:
+                        std::cerr << "[ERROR] " << entry.Message << std::endl;
+                        break;
+                }
+            }
+        }
+    }
+}
 
 
 //------------------------------------------------------------------------------

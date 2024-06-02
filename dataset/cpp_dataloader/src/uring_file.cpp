@@ -15,7 +15,6 @@
 #include <sys/ioctl.h>
 #include <sys/statvfs.h>
 
-#include <iostream>
 #include <fstream>
 
 
@@ -70,7 +69,7 @@ void IoReuseAllocator::Free(io_data* data) {
         }
     }
 
-    std::cerr << "Failed to free io_data: Not found in Used list" << std::endl;
+    LOG_ERROR() << "Failed to free io_data: Not found in Used list";
 }
 
 
@@ -80,7 +79,7 @@ void IoReuseAllocator::Free(io_data* data) {
 bool FileEndCache::FillCache(const std::string& file_path) {
     std::ifstream file(file_path, std::ios::binary | std::ios::ate);
     if (!file) {
-        std::cerr << "FileEndCache: Failed to open file: " << file_path << std::endl;
+        LOG_ERROR() << "FileEndCache: Failed to open file: " << file_path;
         return false;
     }
 
@@ -91,13 +90,13 @@ bool FileEndCache::FillCache(const std::string& file_path) {
 
     file.seekg(FinalOffset);
     if (!file) {
-        std::cerr << "FileEndCache: Failed to seek to position: " << FinalOffset << std::endl;
+        LOG_ERROR() << "FileEndCache: Failed to seek to position: " << FinalOffset;
         return false;
     }
 
     file.read(reinterpret_cast<char*>(FinalBuffer), FinalBytes);
     if (!file) {
-        std::cerr << "FileEndCache: Failed to read " << FinalBytes << " bytes from file" << std::endl;
+        LOG_ERROR() << "FileEndCache: Failed to read " << FinalBytes << " bytes from file";
         return false;
     }
 
@@ -181,7 +180,7 @@ void AsyncUringReader::Close() {
     }
 
     if (inflight > 0) {
-        std::cerr << "AsyncUringReader: Not all inflight requests were completed.  inflight = " << inflight << std::endl;
+        LOG_ERROR() << "AsyncUringReader: Not all inflight requests were completed.  inflight = " << inflight;
     }
 }
 
@@ -189,12 +188,12 @@ void AsyncUringReader::HandleCqe(struct io_uring_cqe* cqe) {
     io_data* data = static_cast<io_data*>(io_uring_cqe_get_data(cqe));
 
     if (!data) {
-        std::cerr << "AsyncUringReader: Invalid data pointer" << std::endl;
+        LOG_ERROR() << "AsyncUringReader: Invalid data pointer";
         return;
     }
 
     if (cqe->res < 0 || cqe->res + data->app_offset < data->app_bytes) {
-        std::cerr << "AsyncUringReader: Error in callback.  res = " << cqe->res << std::endl;
+        LOG_ERROR() << "AsyncUringReader: Error in callback.  res = " << cqe->res;
         data->callback(nullptr, 0);
     } else {
         data->callback(data->buffer + data->app_offset, data->app_bytes);
@@ -238,7 +237,7 @@ bool AsyncUringReader::Read(
     io_uring_sqe_set_data(sqe, data.get());
     int r = io_uring_submit(&ring);
     if (r < 0) {
-        std::cerr << "AsyncUringReader: io_uring_submit failed: " << r << " (" << strerror(-r) << ")" << std::endl;
+        LOG_ERROR() << "AsyncUringReader: io_uring_submit failed: " << r << " (" << strerror(-r) << ")";
         return false;
     }
 

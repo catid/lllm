@@ -1,11 +1,11 @@
 #include "compressor.hpp"
 
+#include "tools.hpp"
+
 #include <zstd.h>
 
 #include <cstdlib>
 #include <cstdint>
-
-#include <iostream>
 
 
 //------------------------------------------------------------------------------
@@ -20,6 +20,7 @@ static const int kCompressionLevel = 1;
 bool Compressor::Compress(const void* data, int bytes, int byte_stride)
 {
     if (bytes > 0x00ffffff || bytes < 0) {
+        LOG_ERROR() << "Compressor: Data too large: bytes=" << bytes;
         return false;
     }
 
@@ -27,6 +28,7 @@ bool Compressor::Compress(const void* data, int bytes, int byte_stride)
 
     if (byte_stride > 1) {
         if (bytes % byte_stride != 0) {
+            LOG_ERROR() << "Compressor: Data=" << bytes << " not divisible by byte_stride=" << byte_stride;
             return false;
         }
 
@@ -56,6 +58,7 @@ bool Compressor::Compress(const void* data, int bytes, int byte_stride)
         kCompressionLevel);
 
     if (ZSTD_isError(compressed_bytes)) {
+        LOG_ERROR() << "Compressor: Failed to compress: r=" << compressed_bytes;
         return false;
     }
 
@@ -75,6 +78,7 @@ bool Compressor::Compress(const void* data, int bytes, int byte_stride)
 bool Decompressor::Decompress(const void* data, int bytes, int byte_stride)
 {
     if (bytes < ZDATA_HEADER_BYTES) {
+        LOG_ERROR() << "Decompressor: Data too small: bytes=" << bytes;
         return false;
     }
 
@@ -97,11 +101,13 @@ bool Decompressor::Decompress(const void* data, int bytes, int byte_stride)
         bytes - ZDATA_HEADER_BYTES);
 
     if (ZSTD_isError(r) || r != original_bytes) {
+        LOG_ERROR() << "Decompressor: Failed to decompress: r=" << r << " original_bytes=" << original_bytes;
         return false;
     }
 
     if (byte_stride > 1) {
         if (original_bytes % byte_stride != 0) {
+            LOG_ERROR() << "Decompressor: Decompressed data=" << original_bytes << " not divisible by byte_stride=" << byte_stride;
             return false;
         }
 

@@ -1,7 +1,6 @@
-#include <iostream>
-#include <cassert>
-
 #include "worker_pool.hpp"
+
+#include "tools.hpp"
 
 bool TestSingleTask() {
     WorkerPool pool;
@@ -16,10 +15,10 @@ bool TestSingleTask() {
     pool.Stop();
 
     if (!task_completed) {
-        std::cout << "TestSingleTask failed" << std::endl;
+        LOG_ERROR() << "TestSingleTask failed";
         return false;
     }
-    std::cout << "TestSingleTask passed" << std::endl;
+    LOG_INFO() << "TestSingleTask passed";
     return true;
 }
 
@@ -42,10 +41,10 @@ bool TestMultipleTasks() {
     pool.Stop();
 
     if ((int)results.size() != num_tasks) {
-        std::cout << "TestMultipleTasks failed" << std::endl;
+        LOG_ERROR() << "TestMultipleTasks failed";
         return false;
     }
-    std::cout << "TestMultipleTasks passed" << std::endl;
+    LOG_INFO() << "TestMultipleTasks passed";
     return true;
 }
 
@@ -57,6 +56,6 @@ int main() {
         return -1;
     }
 
-    std::cout << "All tests passed" << std::endl;
+    LOG_INFO() << "All tests passed";
     return 0;
 }
