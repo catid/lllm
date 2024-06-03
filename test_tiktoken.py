@@ -4,7 +4,7 @@ import tiktoken
 class TestTikTokenizer(unittest.TestCase):
     def setUp(self):
         # Initialize the tokenizer with the latest model
-        self.tokenizer = tiktoken.encoding_for_model("gpt-4")
+        self.tokenizer = tiktoken.encoding_for_model("gpt-4o")
 
     def generate_test_cases(self):
         # Programmatically generate a list of test cases

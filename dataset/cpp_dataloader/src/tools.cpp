@@ -34,7 +34,10 @@ Logger::~Logger() {
     if (LoggerThread.joinable()) {
         LoggerThread.join();
     }
-    ProcessLogQueue(); // Process any remaining logs
+
+    // Process any remaining logs
+    LogsToProcess.swap(LogQueue);
+    ProcessLogQueue();
 }
 
 void Logger::SetLogLevel(LogLevel level) {
@@ -58,12 +61,13 @@ void Logger::Terminate() {
 
 void Logger::RunLogger() {
     while (!Terminated) {
-        std::unique_lock<std::mutex> lock(LogQueueMutex);
-        LogQueueCV.wait(lock, [this] { return !LogQueue.empty() || Terminated; });
-
-        if (!LogQueue.empty()) {
-            ProcessLogQueue();
+        {
+            std::unique_lock<std::mutex> lock(LogQueueMutex);
+            LogQueueCV.wait(lock, [this] { return !LogQueue.empty() || Terminated; });
+            LogsToProcess.swap(LogQueue);
         }
+
+        ProcessLogQueue();
 
         if (Terminated) {
             break;
@@ -72,10 +76,11 @@ void Logger::RunLogger() {
 }
 
 void Logger::ProcessLogQueue() {
-    std::vector<LogEntry> logsToProcess;
-    logsToProcess.swap(LogQueue);
+    if (LogQueue.empty()) {
+        return;
+    }
 
-    for (const auto& entry : logsToProcess) {
+    for (const auto& entry : LogsToProcess) {
         if (entry.Level >= CurrentLogLevel) {
             if (Callback) {
                 Callback(entry.Level, entry.Message);
@@ -97,6 +102,8 @@ void Logger::ProcessLogQueue() {
             }
         }
     }
+
+    LogsToProcess.clear();
 }
 
 

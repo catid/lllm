@@ -20,7 +20,7 @@ cd lllm
 
 conda create -n lllm python=3.10 -y && conda activate lllm
 
-pip install -r requirements.txt
+pip install -U -r requirements.txt
 
 # Run unit tests to make sure everything is working
 pytest
@@ -51,6 +51,7 @@ python -m dataset.download_dataset
 * ReMoRa with Sophia optimizer https://github.com/Liuhong99/Sophia/blob/main/sophia.py
 * Speedup https://github.com/Liuhong99/Sophia/pull/35
 * https://github.com/sustcsonglin/flash-linear-attention for implementations of fast linear attention
+
 
 # TODO
 

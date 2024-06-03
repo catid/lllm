@@ -88,6 +88,8 @@ private:
 
     std::atomic<bool> Terminated = ATOMIC_VAR_INIT(false);
 
+    std::vector<LogEntry> LogsToProcess;
+
     void Log(LogLevel level, std::ostringstream&& message);
     void RunLogger();
     void ProcessLogQueue();

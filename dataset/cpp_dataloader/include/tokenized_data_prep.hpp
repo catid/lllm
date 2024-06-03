@@ -52,6 +52,10 @@ protected:
 
 class TokenizedDataPrep {
 public:
+    ~TokenizedDataPrep() {
+        Stop();
+    }
+
     void Start(const std::string& data_folder_path);
     bool WriteTokenizedText(const uint32_t* tokenized_text, uint32_t text_length);
     bool Stop();
