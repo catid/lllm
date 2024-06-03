@@ -3,7 +3,13 @@
 #include "tools.hpp"
 
 bool test_data_verify() {
-    return data_verify("test_data");
+    if (!data_verify("test_data")) {
+        LOG_ERROR() << "test_data_verify test failed";
+        return false;
+    }
+
+    LOG_INFO() << "test_data_verify test passed";
+    return true;
 }
 
 bool test_data_loader() {
@@ -27,20 +33,24 @@ bool test_data_loader() {
         uint32_t output_batch[k_micro_batch_size * k_context_size];
         uint8_t is_continuation[micro_batch_size];
 
-        loader.GetTokenArray(&micro_batch_size, &num_tokens, output_batch, is_continuation);
+        if (!loader.GetTokenArray(&micro_batch_size, &num_tokens, output_batch, is_continuation)) {
+            return false;
+        }
     }
 
     loader.Stop();
 
+    LOG_INFO() << "test_data_loader test passed";
     return true;
 }
 
 int main() {
     if (!test_data_verify()) {
-        LOG_ERROR() << "test_data_verify test failed";
         return -1;
-    } else {
-        LOG_INFO() << "test_data_verify test passed";
+    }
+
+    if (!test_data_loader()) {
+        return -1;
     }
 
     LOG_INFO() << "All tests passed";

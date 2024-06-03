@@ -93,6 +93,9 @@ struct DataShardContext {
     // We shuffle each shard independently so that multiple threads can
     // work on the shuffling process in parallel.  Each shuffle is O(n).
     std::vector<uint32_t> SpanIndices;
+
+    // The next span index to read from the current shard.
+    uint32_t NextSpan = 0;
 };
 
 
@@ -148,7 +151,6 @@ private:
 
     std::mutex prefill_mutex_;
     uint32_t next_shard_index_ = 0;
-    std::vector<uint32_t> shard_next_datum_;
     std::atomic<uint32_t> prefill_inflight_ = ATOMIC_VAR_INIT(0);
 
     std::mutex output_mutex_;
@@ -162,6 +164,9 @@ private:
 
     void ResetPrefill();
     void Prefill();
+
+    // Returns false if there is no more data to read.
+    bool NextSpan(ReadRequest& request);
 };
 
 

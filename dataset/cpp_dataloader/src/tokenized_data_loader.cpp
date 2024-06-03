@@ -223,11 +223,6 @@ void TokenizedDataLoader::ResetPrefill()
         output_used_[batch_index] = 0;
         decompressors_[batch_index]->Result.clear();
     }
-
-    shard_next_datum_.resize(shards_.size());
-    for (int i = 0; i < (int)shards_.size(); ++i) {
-        shard_next_datum_[i] = 0;
-    }
 }
 
 void TokenizedDataLoader::Prefill() {
@@ -253,9 +248,16 @@ void TokenizedDataLoader::Prefill() {
 
         ReadRequest request;
         request.batch_index = batch_index;
-        request.shard_index = next_shard_index_;
-        request.shard_datum_index = shard_next_datum_[next_shard_index_]++;
+        if (!NextSpan(request)) {
+            break; // No more data to read
+        }
+
         requests.push_back(request);
+    }
+
+    if (requests.empty()) {
+        LOG_INFO() << "No more data to read";
+        return;
     }
 
     prefill_inflight_ += (uint32_t)requests.size();
@@ -286,6 +288,33 @@ void TokenizedDataLoader::Prefill() {
 
         });
     }
+}
+
+bool TokenizedDataLoader::NextSpan(ReadRequest& request) {
+    const uint32_t shard_count = (uint32_t)shards_.size();
+    for (uint32_t tries = 0; tries < shard_count; ++tries)
+    {
+        const uint32_t shard_index = next_shard_index_;
+
+        // Round-robin through the shards
+        next_shard_index_ = shard_index + 1;
+        if (next_shard_index_ == shard_count) {
+            next_shard_index_ = 0;
+        }
+
+        auto& shard = shards_[shard_index];
+        uint32_t shard_span_index = shard->NextSpan;
+
+        if (shard_span_index < shard->NumSpans) {
+            shard->NextSpan = shard_span_index + 1;
+
+            request.shard_index = shard_index;
+            request.shard_datum_index = shard_span_index;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool TokenizedDataLoader::GetTokenArray(
