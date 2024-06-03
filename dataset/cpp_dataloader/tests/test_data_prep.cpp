@@ -16,6 +16,25 @@
 #include <vector>
 #include <fstream>
 
+static const char* kTestData =
+"    // Generate random tokenized text data\r\n" \
+"    std::random_device rd;\r\n" \
+"    std::mt19937 gen(rd());\r\n" \
+"    std::uniform_int_distribution<> dist(0, 255);\r\n" \
+"\r\n" \
+"    std::vector<std::vector<uint32_t>> tokenized_texts;\r\n" \
+"    int num_texts = 100;\r\n" \
+"    int max_text_length = 20000;\r\n" \
+"\r\n" \
+"    for (int i = 0; i < num_texts; ++i) {\r\n" \
+"        int text_length = gen() % max_text_length + 1;\r\n" \
+"        std::vector<uint32_t> tokenized_text(text_length);\r\n" \
+"        for (int j = 0; j < text_length; ++j) {\r\n" \
+"            tokenized_text[j] = dist(gen);\r\n" \
+"        }\r\n" \
+"        tokenized_texts.push_back(tokenized_text);\r\n" \
+"    }\r\n";
+
 bool testTokenizedDataPrep() {
     std::string data_folder_path = "test_data";
     TokenizedDataPrep data_prep;
@@ -24,17 +43,17 @@ bool testTokenizedDataPrep() {
     // Generate random tokenized text data
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dist(0, 255);
 
     std::vector<std::vector<uint32_t>> tokenized_texts;
     int num_texts = 100;
     int max_text_length = 20000;
+    const int test_data_len = strlen(kTestData);
 
     for (int i = 0; i < num_texts; ++i) {
         int text_length = gen() % max_text_length + 1;
         std::vector<uint32_t> tokenized_text(text_length);
         for (int j = 0; j < text_length; ++j) {
-            tokenized_text[j] = dist(gen);
+            tokenized_text[j] = kTestData[j % test_data_len];
         }
         tokenized_texts.push_back(tokenized_text);
     }

@@ -59,6 +59,10 @@ bool CompressorContext::WriteTokenizedText(
 
 bool CompressorContext::FinishCurrentFile()
 {
+    if (current_file_bytes_ == 0) {
+        return true;
+    }
+
     /*
         End of index file format:
             <final data file size (4 bytes)>

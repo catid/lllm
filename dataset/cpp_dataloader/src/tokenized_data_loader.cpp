@@ -227,7 +227,7 @@ void TokenizedDataLoader::ResetPrefill()
 }
 
 void TokenizedDataLoader::Prefill() {
-    LOG_INFO() << "Shuffle complete.  Prefilling " << micro_batch_size_ << "...";
+    LOG_DEBUG() << "Shuffle complete.  Prefilling " << micro_batch_size_ << "...";
 
     if (prefill_inflight_ > 0) {
         LOG_ERROR() << "Internal error: Prefill still inflight"; 
@@ -276,12 +276,16 @@ void TokenizedDataLoader::Prefill() {
             shards_[request.shard_index]->DataFile->Read(offset, bytes,
                 [this, request](uint8_t* data, uint32_t bytes)
             {
+                total_disk_read_ += bytes;
+
                 auto& decompressor = decompressors_[request.batch_index];
                 if (!decompressor->Decompress(data, bytes, kCompressorByteStride)) {
                     LOG_ERROR() << "Failed to decompress data";
                     worker_error_ = true;
                     return;
                 }
+
+                total_decompressed_bytes_ += decompressor->Result.size();
 
                 uint32_t remaining = --prefill_inflight_;
                 if (remaining == 0) {
@@ -356,7 +360,7 @@ bool TokenizedDataLoader::GetTokenArray(
         }
         uint32_t copy_bytes = std::min(available, context_size_);
 
-        LOG_INFO() << "batch_index=" << batch_index << ", copy_bytes=" << copy_bytes << ", used=" << used << ", available=" << available << ", decompressed_words=" << decompressed_words;
+        LOG_DEBUG() << "batch_index=" << batch_index << ", copy_bytes=" << copy_bytes << ", used=" << used << ", available=" << available << ", decompressed_words=" << decompressed_words;
 
         memcpy(output_batch, decompressed_ptr + used, copy_bytes * sizeof(uint32_t));
         output_batch += copy_bytes;
@@ -388,7 +392,7 @@ bool TokenizedDataLoader::GetTokenArray(
     *max_tokens_out = max_token_count;
 
     if (num_rows == 0) {
-        LOG_INFO() << "GetTokenArray: No data to read";
+        LOG_INFO() << "GetTokenArray: Training data exhausted.  Disk compression: " << (total_disk_read_ * 100.0 / total_decompressed_bytes_) << "% of original tokens"; 
         return false;
     }
 

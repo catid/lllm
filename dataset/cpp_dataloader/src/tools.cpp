@@ -25,7 +25,7 @@ Logger& Logger::getInstance() {
     return *Instance;
 }
 
-Logger::Logger() : CurrentLogLevel(LogLevel::INFO), Terminated(false) {
+Logger::Logger() {
     LoggerThread = std::thread(&Logger::RunLogger, this);
 }
 
@@ -38,7 +38,6 @@ Logger::~Logger() {
 }
 
 void Logger::SetLogLevel(LogLevel level) {
-    std::lock_guard<std::mutex> lock(LogQueueMutex);
     CurrentLogLevel = level;
 }
 

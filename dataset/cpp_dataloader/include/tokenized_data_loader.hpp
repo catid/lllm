@@ -154,6 +154,9 @@ private:
     std::atomic<uint32_t> prefill_inflight_ = ATOMIC_VAR_INIT(0);
     std::atomic<bool> prefill_complete_ = ATOMIC_VAR_INIT(false);
 
+    std::atomic<uint64_t> total_disk_read_ = ATOMIC_VAR_INIT(0);
+    std::atomic<uint64_t> total_decompressed_bytes_ = ATOMIC_VAR_INIT(0);
+
     std::mutex output_mutex_;
     std::condition_variable output_condition_;
 

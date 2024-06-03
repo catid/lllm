@@ -15,10 +15,10 @@
 //------------------------------------------------------------------------------
 // Logger
 
-enum class LogLevel { DEBUG, INFO, WARN, ERROR };
-
 class Logger {
 public:
+    enum LogLevel { DEBUG, INFO, WARN, ERROR };
+
     static Logger& getInstance();
 
     Logger();
@@ -29,28 +29,43 @@ public:
 
     class LogStream {
     public:
-        LogStream(Logger& logger, LogLevel level) : logger_(logger), level_(level) {}
-        LogStream(const LogStream&& other) : logger_(other.logger_), level_(other.level_) {}
+        LogStream(Logger& logger, LogLevel level, bool log_enabled = true)
+            : logger_(logger)
+            , level_(level)
+            , log_enabled_(log_enabled)
+        {
+        }
+        LogStream(const LogStream&& other)
+            : logger_(other.logger_)
+            , level_(other.level_)
+        {
+        }
         ~LogStream() {
-            logger_.Log(level_, std::move(ss_));
+            if (log_enabled_) {
+                logger_.Log(level_, std::move(ss_));
+            }
         }
 
         template<typename T>
         LogStream& operator<<(const T& value) {
-            ss_ << value;
+            if (log_enabled_) {
+                ss_ << value;
+            }
             return *this;
         }
 
     private:
         Logger& logger_;
         LogLevel level_;
+        bool log_enabled_ = false;
+
         std::ostringstream ss_;
     };
 
-    LogStream Debug() { return LogStream(*this, LogLevel::DEBUG); }
-    LogStream Info() { return LogStream(*this, LogLevel::INFO); }
-    LogStream Warn() { return LogStream(*this, LogLevel::WARN); }
-    LogStream Error() { return LogStream(*this, LogLevel::ERROR); }
+    LogStream Debug() { return LogStream(*this, LogLevel::DEBUG, CurrentLogLevel <= LogLevel::DEBUG); }
+    LogStream Info() { return LogStream(*this, LogLevel::INFO, CurrentLogLevel <= LogLevel::INFO); }
+    LogStream Warn() { return LogStream(*this, LogLevel::WARN, CurrentLogLevel <= LogLevel::WARN); }
+    LogStream Error() { return LogStream(*this, LogLevel::ERROR, CurrentLogLevel <= LogLevel::ERROR); }
 
     void Terminate();
 
@@ -68,10 +83,10 @@ private:
     std::condition_variable LogQueueCV;
 
     std::thread LoggerThread;
-    LogLevel CurrentLogLevel;
+    std::atomic<LogLevel> CurrentLogLevel = ATOMIC_VAR_INIT(LogLevel::INFO);
     std::function<void(LogLevel, const std::string&)> Callback;
 
-    std::atomic<bool> Terminated;
+    std::atomic<bool> Terminated = ATOMIC_VAR_INIT(false);
 
     void Log(LogLevel level, std::ostringstream&& message);
     void RunLogger();

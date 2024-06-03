@@ -37,7 +37,7 @@ bool test_data_loader() {
             break;
         }
 
-        LOG_INFO() << "micro_batch_size=" << micro_batch_size << ", num_tokens=" << num_tokens;
+        LOG_INFO() << "Batch retrieved: micro_batch_size=" << micro_batch_size << ", num_tokens=" << num_tokens;
     }
 
     loader.Stop();
