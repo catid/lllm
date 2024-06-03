@@ -28,7 +28,7 @@ bool testTokenizedDataPrep() {
 
     std::vector<std::vector<uint32_t>> tokenized_texts;
     int num_texts = 100;
-    int max_text_length = 1000;
+    int max_text_length = 20000;
 
     for (int i = 0; i < num_texts; ++i) {
         int text_length = gen() % max_text_length + 1;

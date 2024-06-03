@@ -31,11 +31,13 @@ bool test_data_loader() {
         uint32_t micro_batch_size;
         uint32_t num_tokens;
         uint32_t output_batch[k_micro_batch_size * k_context_size];
-        uint8_t is_continuation[micro_batch_size];
+        uint8_t is_continuation[k_micro_batch_size];
 
         if (!loader.GetTokenArray(&micro_batch_size, &num_tokens, output_batch, is_continuation)) {
-            return false;
+            break;
         }
+
+        LOG_INFO() << "micro_batch_size=" << micro_batch_size << ", num_tokens=" << num_tokens;
     }
 
     loader.Stop();

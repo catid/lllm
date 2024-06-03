@@ -212,6 +212,7 @@ void TokenizedDataLoader::ResetPrefill()
 
     next_shard_index_ = 0;
     prefill_inflight_ = 0;
+    prefill_complete_ = false;
 
     // Resize to the number of prefill tasks
     decompressors_.resize(micro_batch_size_);
@@ -252,14 +253,18 @@ void TokenizedDataLoader::Prefill() {
             break; // No more data to read
         }
 
+        output_used_[batch_index] = 0;
+
         requests.push_back(request);
     }
 
     if (requests.empty()) {
-        LOG_INFO() << "No more data to read";
+        LOG_INFO() << "Prepared dataset files contain no more data";
+        prefill_complete_ = true;
         return;
     }
 
+    prefill_complete_ = false;
     prefill_inflight_ += (uint32_t)requests.size();
 
     for (auto& request : requests) {
@@ -282,6 +287,7 @@ void TokenizedDataLoader::Prefill() {
                 if (remaining == 0) {
                     // All prefill requests have completed
                     std::unique_lock<std::mutex> lock(output_mutex_);
+                    prefill_complete_ = true;
                     output_condition_.notify_all();
                 }
             });
@@ -326,7 +332,7 @@ bool TokenizedDataLoader::GetTokenArray(
     // Wait until output is ready
     {
         std::unique_lock<std::mutex> lock(output_mutex_);
-        output_condition_.wait(lock, [this]{ return Terminated || prefill_inflight_ == 0; });
+        output_condition_.wait(lock, [this]{ return Terminated || prefill_complete_; });
         if (Terminated) {
             return false;
         }
@@ -350,6 +356,8 @@ bool TokenizedDataLoader::GetTokenArray(
         }
         uint32_t copy_bytes = std::min(available, context_size_);
 
+        LOG_INFO() << "batch_index=" << batch_index << ", copy_bytes=" << copy_bytes << ", used=" << used << ", available=" << available << ", decompressed_words=" << decompressed_words;
+
         memcpy(output_batch, decompressed_ptr + used, copy_bytes * sizeof(uint32_t));
         output_batch += copy_bytes;
         max_token_count = std::max(max_token_count, copy_bytes);
@@ -362,6 +370,8 @@ bool TokenizedDataLoader::GetTokenArray(
 
         // Signal continuation for this row
         *is_continuation++ = (used != 0);
+
+        output_used_[batch_index] = used + copy_bytes;
 
         ++num_rows;
     }
@@ -376,6 +386,11 @@ bool TokenizedDataLoader::GetTokenArray(
 
     *micro_batch_out = num_rows;
     *max_tokens_out = max_token_count;
+
+    if (num_rows == 0) {
+        LOG_INFO() << "GetTokenArray: No data to read";
+        return false;
+    }
 
     Prefill();
     return true;

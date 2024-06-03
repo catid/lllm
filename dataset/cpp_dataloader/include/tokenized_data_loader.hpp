@@ -152,6 +152,7 @@ private:
     std::mutex prefill_mutex_;
     uint32_t next_shard_index_ = 0;
     std::atomic<uint32_t> prefill_inflight_ = ATOMIC_VAR_INIT(0);
+    std::atomic<bool> prefill_complete_ = ATOMIC_VAR_INIT(false);
 
     std::mutex output_mutex_;
     std::condition_variable output_condition_;
