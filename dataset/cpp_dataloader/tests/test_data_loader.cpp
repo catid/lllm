@@ -33,11 +33,18 @@ bool test_data_loader() {
         uint32_t output_batch[k_micro_batch_size * k_context_size];
         uint8_t is_continuation[k_micro_batch_size];
 
+        uint64_t t0 = GetNsec();
+
         if (!loader.GetTokenArray(&micro_batch_size, &num_tokens, output_batch, is_continuation)) {
             break;
         }
 
-        LOG_INFO() << "Batch retrieved: micro_batch_size=" << micro_batch_size << ", num_tokens=" << num_tokens;
+        uint64_t t1 = GetNsec();
+        double dt_usec = (t1 - t0) / 1000.0;
+
+        LOG_INFO() << "Batch retrieved: micro_batch_size=" << micro_batch_size << ", num_tokens=" << num_tokens << ", dt_usec=" << dt_usec;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
     loader.Stop();
