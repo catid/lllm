@@ -295,13 +295,14 @@ void TokenizedDataLoader::Prefill() {
             continue;
         }
 
+        // Reset the used count for this row
+        output_used_[batch_index] = 0;
+
         ReadRequest request;
         request.batch_index = batch_index;
         if (!NextSpan(request)) {
             break; // No more data to read
         }
-
-        output_used_[batch_index] = 0;
 
         requests.push_back(request);
     }
@@ -316,17 +317,31 @@ void TokenizedDataLoader::Prefill() {
     prefill_started_ = true;
     prefill_inflight_ += (uint32_t)requests.size();
 
-    for (auto& request : requests) {
+    for (auto request : requests) {
         pool_.QueueTask([this, request](int /*worker_index*/) {
+            if (request.shard_index >= shards_.size()) {
+                LOG_ERROR() << "Internal error: Requested shard index " << request.shard_index << " is out of range";
+                return;
+            }
+            if (request.batch_index >= decompressors_.size()) {
+                LOG_ERROR() << "Internal error: Requested batch index " << request.batch_index << " is out of range";
+                return;
+            }
+
             // Read offsets from mmap index file
             uint32_t bytes = 0;
             uint64_t offset = shards_[request.shard_index]->GetSpan(
-                request.shard_datum_index,
+                /*request.shard_datum_index,*/0, // FIXME: REMOVE THIS
                 bytes);
 
             shards_[request.shard_index]->DataFile->Read(offset, bytes,
                 [this, request](uint8_t* data, uint32_t bytes)
             {
+                if (request.batch_index >= decompressors_.size()) {
+                    LOG_ERROR() << "Internal error: Requested batch index " << request.batch_index << " is out of range";
+                    return;
+                }
+
                 total_disk_read_ += bytes;
 
                 auto& decompressor = decompressors_[request.batch_index];
@@ -416,15 +431,15 @@ bool TokenizedDataLoader::GetTokenArray(
         if (available <= 0) {
             continue;
         }
-        uint32_t copy_bytes = std::min(available, context_size_);
+        uint32_t copy_words = std::min(available, context_size_);
 
-        LOG_DEBUG() << "batch_index=" << batch_index << ", copy_bytes=" << copy_bytes << ", used=" << used << ", available=" << available << ", decompressed_words=" << decompressed_words;
+        LOG_DEBUG() << "batch_index=" << batch_index << ", copy_words=" << copy_words << ", used=" << used << ", available=" << available << ", decompressed_words=" << decompressed_words;
 
-        memcpy(output_batch, decompressed_ptr + used, copy_bytes * sizeof(uint32_t));
-        output_batch += copy_bytes;
-        max_token_count = std::max(max_token_count, copy_bytes);
+        memcpy(output_batch, decompressed_ptr + used, copy_words * sizeof(uint32_t));
+        output_batch += copy_words;
+        max_token_count = std::max(max_token_count, copy_words);
 
-        uint32_t pad_bytes = context_size_ - copy_bytes;
+        const uint32_t pad_bytes = context_size_ - copy_words;
         if (pad_bytes > 0) {
             memset(output_batch, kPaddingToken, pad_bytes * sizeof(uint32_t));
             output_batch += pad_bytes;
@@ -433,14 +448,14 @@ bool TokenizedDataLoader::GetTokenArray(
         // Signal continuation for this row
         *is_continuation++ = (used != 0);
 
-        output_used_[batch_index] = used + copy_bytes;
+        output_used_[batch_index] = used + copy_words;
 
         ++num_rows;
     }
 
     // Pad the remaining unwritten rows with padding tokens
     if (num_rows < micro_batch_size_) {
-        uint32_t pad_rows = micro_batch_size_ - num_rows;
+        const uint32_t pad_rows = micro_batch_size_ - num_rows;
         assert(kPaddingToken == 0);
         memset(output_batch, 0, pad_rows * context_size_ * sizeof(uint32_t));
         memset(is_continuation, 0, pad_rows);

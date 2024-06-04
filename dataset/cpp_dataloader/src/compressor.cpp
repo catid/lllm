@@ -59,7 +59,7 @@ bool Compressor::Compress(const void* data, int bytes, int byte_stride)
         kCompressionLevel);
 
     if (ZSTD_isError(compressed_bytes)) {
-        LOG_ERROR() << "Compressor: Failed to compress: r=" << compressed_bytes;
+        LOG_ERROR() << "Compressor: Failed to compress: r=" << compressed_bytes << " err=" << ZSTD_getErrorName(compressed_bytes);
         return false;
     }
 
@@ -102,7 +102,7 @@ bool Decompressor::Decompress(const void* data, int bytes, int byte_stride)
         bytes - ZDATA_HEADER_BYTES);
 
     if (ZSTD_isError(r) || r != original_bytes) {
-        LOG_ERROR() << "Decompressor: Failed to decompress: r=" << r << " original_bytes=" << original_bytes;
+        LOG_ERROR() << "Decompressor: Failed to decompress: r=" << r << " original_bytes=" << original_bytes << " err=" << ZSTD_getErrorName(r);
         return false;
     }
 

@@ -51,7 +51,7 @@ python -m dataset.download_dataset
 * ReMoRa with Sophia optimizer https://github.com/Liuhong99/Sophia/blob/main/sophia.py
 * Speedup https://github.com/Liuhong99/Sophia/pull/35
 * https://github.com/sustcsonglin/flash-linear-attention for implementations of fast linear attention
-
+* RWKV-6: https://github.com/Ronsor/rwkv-simple
 
 # TODO
 
