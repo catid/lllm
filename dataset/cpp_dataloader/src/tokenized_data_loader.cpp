@@ -87,25 +87,42 @@ void DataShardContext::Close()
     IndexFile = nullptr;
 }
 
-void DataShardContext::ShuffleIndices(uint64_t seed0, uint64_t seed1)
+void DataShardContext::ShuffleIndices(
+    uint64_t seed0, uint64_t seed1,
+    uint32_t rank,
+    uint32_t local_ranks)
 {
-    std::seed_seq seed{seed0, seed1};
-    std::mt19937 rng(seed);
-
-    SpanIndices.reserve(NumSpans);
-    uint32_t* span_ptr = SpanIndices.data();
+    ShuffledIndices.resize(NumSpans);
+    uint32_t* span_ptr = ShuffledIndices.data();
     for (uint32_t i = 0; i < NumSpans; ++i) {
         span_ptr[i] = i;
     }
 
-    std::shuffle(SpanIndices.begin(), SpanIndices.end(), rng);
+    std::seed_seq seed{seed0, seed1};
+    std::mt19937 rng(seed);
+    std::shuffle(ShuffledIndices.begin(), ShuffledIndices.end(), rng);
+
+    // Apply local rank subset:
+
+    uint32_t max_rank_count = (NumSpans + local_ranks - 1) / local_ranks;
+    uint32_t local_rank_start = max_rank_count * rank;
+
+    EpochSpanData = ShuffledIndices.data() + local_rank_start;
+
+    // Calculate number of spans to read for this epoch
+    if (local_rank_start + max_rank_count < NumSpans) {
+        EpochSpanCount = max_rank_count;
+    } else {
+        EpochSpanCount = NumSpans - local_rank_start;
+    }
+    EpochNextSpan = 0;
 }
 
 uint64_t DataShardContext::GetSpan(
     uint32_t span_index,
     uint32_t& bytes_out)
 {
-    uint32_t index = SpanIndices[span_index];
+    uint32_t index = EpochSpanData[span_index];
     const uint8_t* span_data = IndexFile->GetData() + index * 4;
     uint32_t start = read_uint32_le(span_data);
     uint32_t end = read_uint32_le(span_data + 4);
@@ -119,7 +136,14 @@ uint64_t DataShardContext::GetSpan(
 //------------------------------------------------------------------------------
 // TokenizedDataLoader
 
-bool TokenizedDataLoader::Start(const std::string& data_folder_path) {
+bool TokenizedDataLoader::Start(
+    const std::string& data_folder_path,
+    uint32_t rank,
+    uint32_t local_ranks)
+{
+    rank_ = rank;
+    local_ranks_ = local_ranks;
+
     Stop();
 
     global_index_yaml_ = std::make_shared<GlobalIndexYaml>();
@@ -130,12 +154,16 @@ bool TokenizedDataLoader::Start(const std::string& data_folder_path) {
 
     pool_.Start();
 
-    worker_error_ = false;
-    prefill_inflight_ = 0;
-    next_shard_index_ = 0;
-    shards_ready_ = 0;
+    // These are set during StartEpoch()
     context_size_ = 0;
     micro_batch_size_ = 0;
+
+    ResetPrefill();
+
+    // Load data index files in parallel:
+
+    worker_error_ = false;
+    shards_ready_ = 0;
 
     const int num_files = (int)global_index_yaml_->data_files_.size();
     for (int i = 0; i < num_files; ++i) {
@@ -156,7 +184,6 @@ bool TokenizedDataLoader::Start(const std::string& data_folder_path) {
         });
     };
 
-    // Note this waits longer than necessary but this is expected to be a heavy call
     pool_.WaitForTasks();
 
     if (worker_error_) {
@@ -183,36 +210,57 @@ void TokenizedDataLoader::StartEpoch(
     uint32_t micro_batch_size,
     uint32_t context_size)
 {
-    LOG_INFO() << "Epoch starting with " << micro_batch_size << " microbatches of " << context_size << " tokens each";
+    LOG_INFO() << "Epoch shuffling " << micro_batch_size << " microbatches of " << context_size << " tokens each";
+
+    if (!WaitUntilDataReady()) {
+        return;
+    }
 
     micro_batch_size_ = micro_batch_size;
     context_size_ = context_size;
 
+    // Clear decompressor state etc
     ResetPrefill();
 
-    shards_ready_ = 0;
+    // Shuffle the order in which we step through the shards
+    pool_.QueueTask([this, seed0, seed1](int /*worker_index*/) {
+        shard_order_.resize(shards_.size() * kShardOrderMult);
+        uint32_t* shard_ptr = shard_order_.data();
+
+        // Repeat each shard number kShardOrderMult times
+        for (uint32_t j = 0; j < (uint32_t)shards_.size(); ++j) {
+            uint32_t* j_ptr = shard_ptr + j * kShardOrderMult;
+            for (uint32_t i = 0; i < kShardOrderMult; ++i) {
+                j_ptr[i] = j;
+            }
+        }
+
+        std::seed_seq seed{seed0, seed1};
+        std::mt19937 rng(seed);
+        std::shuffle(shard_order_.begin(), shard_order_.end(), rng);
+    });
+    seed1++;
+
+    // Shuffle all the shard indices
     for (auto& shard : shards_) {
         pool_.QueueTask([this, shard, seed0, seed1](int /*worker_index*/) {
-            shard->ShuffleIndices(seed0, seed1);
-
-            uint32_t ready_count = ++shards_ready_;
-            if (ready_count == shards_.size()) {
-                Prefill();
-            }
+            shard->ShuffleIndices(seed0, seed1, rank_, local_ranks_);
         });
-
-        // Use a slightly different seed for each shard.  Not sure if it matters.
-        seed0++;
+        seed1++;
     }
+
+    // Wait for shuffles to complete before prefilling
+    pool_.WaitForTasks();
+
+    Prefill();
 }
 
 void TokenizedDataLoader::ResetPrefill()
 {
-    std::lock_guard<std::mutex> lock(prefill_mutex_);
-
     next_shard_index_ = 0;
     prefill_inflight_ = 0;
     prefill_complete_ = false;
+    prefill_started_ = false;
 
     // Resize to the number of prefill tasks
     decompressors_.resize(micro_batch_size_);
@@ -227,7 +275,7 @@ void TokenizedDataLoader::ResetPrefill()
 }
 
 void TokenizedDataLoader::Prefill() {
-    LOG_DEBUG() << "Shuffle complete.  Prefilling " << micro_batch_size_ << "...";
+    LOG_DEBUG() << "Prefilling " << micro_batch_size_ << "...";
 
     if (prefill_inflight_ > 0) {
         LOG_ERROR() << "Internal error: Prefill still inflight"; 
@@ -265,13 +313,16 @@ void TokenizedDataLoader::Prefill() {
     }
 
     prefill_complete_ = false;
+    prefill_started_ = true;
     prefill_inflight_ += (uint32_t)requests.size();
 
     for (auto& request : requests) {
         pool_.QueueTask([this, request](int /*worker_index*/) {
             // Read offsets from mmap index file
             uint32_t bytes = 0;
-            uint64_t offset = shards_[request.shard_index]->GetSpan(request.shard_datum_index, bytes);
+            uint64_t offset = shards_[request.shard_index]->GetSpan(
+                request.shard_datum_index,
+                bytes);
 
             shards_[request.shard_index]->DataFile->Read(offset, bytes,
                 [this, request](uint8_t* data, uint32_t bytes)
@@ -280,9 +331,8 @@ void TokenizedDataLoader::Prefill() {
 
                 auto& decompressor = decompressors_[request.batch_index];
                 if (!decompressor->Decompress(data, bytes, kCompressorByteStride)) {
-                    LOG_ERROR() << "Failed to decompress data";
+                    LOG_ERROR() << "Failed to decompress data for shard=" << request.shard_index << " index=" << request.shard_datum_index;
                     worker_error_ = true;
-                    return;
                 }
 
                 total_decompressed_bytes_ += decompressor->Result.size();
@@ -301,22 +351,22 @@ void TokenizedDataLoader::Prefill() {
 }
 
 bool TokenizedDataLoader::NextSpan(ReadRequest& request) {
-    const uint32_t shard_count = (uint32_t)shards_.size();
-    for (uint32_t tries = 0; tries < shard_count; ++tries)
+    // TBD: This will do more than one round-robin through the shards due to the randomization
+    // in the shard order.
+    for (uint32_t tries = 0; tries < (uint32_t)shard_order_.size(); ++tries)
     {
-        const uint32_t shard_index = next_shard_index_;
+        const uint32_t shard_index = shard_order_[next_shard_index_++];
 
         // Round-robin through the shards
-        next_shard_index_ = shard_index + 1;
-        if (next_shard_index_ == shard_count) {
+        if (next_shard_index_ >= (uint32_t)shard_order_.size()) {
             next_shard_index_ = 0;
         }
 
         auto& shard = shards_[shard_index];
-        uint32_t shard_span_index = shard->NextSpan;
+        uint32_t shard_span_index = shard->EpochNextSpan;
 
-        if (shard_span_index < shard->NumSpans) {
-            shard->NextSpan = shard_span_index + 1;
+        if (shard_span_index < shard->EpochSpanCount) {
+            shard->EpochNextSpan = shard_span_index + 1;
 
             request.shard_index = shard_index;
             request.shard_datum_index = shard_span_index;
@@ -324,7 +374,14 @@ bool TokenizedDataLoader::NextSpan(ReadRequest& request) {
         }
     }
 
+    // Data exhausted
     return false;
+}
+
+bool TokenizedDataLoader::WaitUntilDataReady() {
+    std::unique_lock<std::mutex> lock(output_mutex_);
+    output_condition_.wait(lock, [this]{ return Terminated || !prefill_started_ || prefill_complete_; });
+    return !Terminated;
 }
 
 bool TokenizedDataLoader::GetTokenArray(
@@ -333,13 +390,14 @@ bool TokenizedDataLoader::GetTokenArray(
     uint32_t* output_batch,
     uint8_t* is_continuation)
 {
-    // Wait until output is ready
-    {
-        std::unique_lock<std::mutex> lock(output_mutex_);
-        output_condition_.wait(lock, [this]{ return Terminated || prefill_complete_; });
-        if (Terminated) {
-            return false;
-        }
+    if (!WaitUntilDataReady()) {
+        LOG_DEBUG() << "Data did not become ready";
+        return false;
+    }
+
+    if (worker_error_) {
+        LOG_ERROR() << "Data loader encountered an error.  Possibly data file is corrupted.";
+        return false;
     }
 
     uint32_t max_token_count = 0;
@@ -458,7 +516,7 @@ bool verify_files(
     return true;
 }
 
-bool data_verify(const std::string& data_folder_path)
+bool VerifyDataset(const std::string& data_folder_path)
 {
     GlobalIndexYaml global_index_yaml;
     if (!global_index_yaml.Read(data_folder_path)) {

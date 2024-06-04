@@ -84,31 +84,55 @@ struct DataShardContext {
     void Close();
 
     std::shared_ptr<AsyncUringReader> DataFile;
-    std::shared_ptr<MappedFileReader> IndexFile;
-    uint32_t NumSpans = 0;
 
-    void ShuffleIndices(uint64_t seed0, uint64_t seed1);
+    void ShuffleIndices(
+        uint64_t seed0, uint64_t seed1,
+        uint32_t rank,
+        uint32_t local_ranks);
     uint64_t GetSpan(uint32_t span_index, uint32_t& bytes_out);
 
+    // The following are filled in by ShuffleIndices():
+
+    // Data for the current epoch.
+    uint32_t* EpochSpanData = nullptr;
+
+    // Number of spans in the current epoch.
+    uint32_t EpochSpanCount = 0;
+
+    // The next span index to read from the current shard for the current epoch.
+    uint32_t EpochNextSpan = 0;
+
+private:
     // We shuffle each shard independently so that multiple threads can
     // work on the shuffling process in parallel.  Each shuffle is O(n).
-    std::vector<uint32_t> SpanIndices;
+    std::vector<uint32_t> ShuffledIndices;
 
-    // The next span index to read from the current shard.
-    uint32_t NextSpan = 0;
+    std::shared_ptr<MappedFileReader> IndexFile;
+
+    // Number of spans in the data file.
+    // During training we take a subset of the spans for each rank,
+    // so the number of spans to do is SpanIndices.size() not NumSpans.
+    uint32_t NumSpans = 0;
 };
 
 
 //------------------------------------------------------------------------------
 // TokenizedDataLoader
 
+// This is not thread-safe so do not call methods from multiple threads.
 class TokenizedDataLoader {
 public:
     ~TokenizedDataLoader() {
         Stop();
     }
 
-    bool Start(const std::string& data_folder_path);
+    // Provide location of the dataset.
+    // Also provide the rank of the current process and the number of local ranks.
+    // This is used to slice up the dataset for each process running on the node.
+    bool Start(
+        const std::string& data_folder_path,
+        uint32_t rank = 0,
+        uint32_t local_ranks = 1);
 
     // This stops all background work without waiting for it to complete.
     void Stop();
@@ -126,6 +150,9 @@ public:
         uint32_t micro_batch_size, // max size of a microbatch
         uint32_t context_size); // max size of a context
 
+    // Pause until all data from the current microbatch is ready.
+    bool WaitUntilDataReady();
+
     // Get the next microbatch of tokens.
     bool GetTokenArray(
         uint32_t* micro_batch_size, // output: batch size
@@ -134,11 +161,28 @@ public:
         uint8_t* is_continuation); // output: vector of bools, one for each batch
 
 private:
+    // The rank of the current process and the number of local ranks
+    uint32_t rank_ = 0;
+    uint32_t local_ranks_ = 1;
+
+    // Is Stop() called?
     std::atomic<bool> Terminated = ATOMIC_VAR_INIT(false);
+
+    // Global YAML file that has the index and data file paths
     std::shared_ptr<GlobalIndexYaml> global_index_yaml_;
 
+    // One shard for each data file
     std::vector<std::shared_ptr<DataShardContext>> shards_;
 
+    // Order in which to step through the shards.
+    // Must be a multiple of the number of shards.
+    std::vector<uint32_t> shard_order_;
+    uint32_t next_shard_index_ = 0; // [ 0, shard_order_.size() - 1 ]
+    static const uint32_t kShardOrderMult = 16;
+
+    std::atomic<uint32_t> shards_ready_ = ATOMIC_VAR_INIT(0);
+
+    // Worker pool for parallelizing various tasks
     WorkerPool pool_;
 
     std::atomic<bool> worker_error_ = ATOMIC_VAR_INIT(false);
@@ -147,11 +191,8 @@ private:
     uint32_t context_size_ = 0;
     uint32_t data_stride_ = 0;
 
-    std::atomic<uint32_t> shards_ready_ = ATOMIC_VAR_INIT(0);
-
-    std::mutex prefill_mutex_;
-    uint32_t next_shard_index_ = 0;
     std::atomic<uint32_t> prefill_inflight_ = ATOMIC_VAR_INIT(0);
+    std::atomic<bool> prefill_started_ = ATOMIC_VAR_INIT(false);
     std::atomic<bool> prefill_complete_ = ATOMIC_VAR_INIT(false);
 
     std::atomic<uint64_t> total_disk_read_ = ATOMIC_VAR_INIT(0);
@@ -177,4 +218,4 @@ private:
 //------------------------------------------------------------------------------
 // Verify
 
-bool data_verify(const std::string& data_folder_path);
+bool VerifyDataset(const std::string& data_folder_path);

@@ -53,7 +53,7 @@ bool testTokenizedDataPrep() {
         int text_length = gen() % max_text_length + 1;
         std::vector<uint32_t> tokenized_text(text_length);
         for (int j = 0; j < text_length; ++j) {
-            tokenized_text[j] = kTestData[j % test_data_len];
+            tokenized_text[j] = kTestData[(i + j) % test_data_len];
         }
         tokenized_texts.push_back(tokenized_text);
     }

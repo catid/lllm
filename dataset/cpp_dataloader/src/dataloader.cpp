@@ -84,8 +84,8 @@ void data_prep_finalize(void* data_prep) {
 //------------------------------------------------------------------------------
 // Data Verification
 
-bool data_prep_verify(const char* data_folder_path) {
-    return data_verify(data_folder_path);
+bool data_verify(const char* data_folder_path) {
+    return VerifyDataset(data_folder_path);
 }
 
 } // extern "C"

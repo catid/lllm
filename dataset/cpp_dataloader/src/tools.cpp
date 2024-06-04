@@ -76,7 +76,7 @@ void Logger::RunLogger() {
 }
 
 void Logger::ProcessLogQueue() {
-    if (LogQueue.empty()) {
+    if (LogsToProcess.empty()) {
         return;
     }
 

@@ -15,7 +15,10 @@ bool test_data_verify() {
 bool test_data_loader() {
     TokenizedDataLoader loader;
 
-    if (!loader.Start("test_data")) {
+    uint32_t rank = 1;
+    uint32_t local_ranks = 2;
+
+    if (!loader.Start("test_data", rank, local_ranks)) {
         LOG_ERROR() << "Failed to start data loader";
         return false;
     }
@@ -26,6 +29,8 @@ bool test_data_loader() {
     uint32_t k_context_size = 8192;
 
     loader.StartEpoch(seed0, seed1, k_micro_batch_size, k_context_size);
+
+    uint64_t total_spans = 0;
 
     for (;;) {
         uint32_t micro_batch_size;
@@ -42,10 +47,15 @@ bool test_data_loader() {
         uint64_t t1 = GetNsec();
         double dt_usec = (t1 - t0) / 1000.0;
 
+        total_spans += micro_batch_size;
+
         LOG_INFO() << "Batch retrieved: micro_batch_size=" << micro_batch_size << ", num_tokens=" << num_tokens << ", dt_usec=" << dt_usec;
+        LOG_INFO() << "Sample data: " << output_batch[0] << " (continuation=" << (int)is_continuation[0] << ")";
 
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
+
+    LOG_INFO() << "Total spans processed: " << total_spans;
 
     loader.Stop();
 

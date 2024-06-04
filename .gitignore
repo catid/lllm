@@ -3,3 +3,4 @@ __pycache__
 dataloader.egg-info
 .vscode
 
+.aider*
