@@ -310,9 +310,6 @@ void TokenizedDataLoader::Prefill() {
             continue;
         }
 
-        // Reset the used count for this row
-        output_used_[batch_index] = 0;
-
         ReadRequest request;
         request.batch_index = batch_index;
         if (!NextSpan(request)) {
@@ -320,6 +317,9 @@ void TokenizedDataLoader::Prefill() {
         }
 
         requests.push_back(request);
+
+        // Reset the used count for this row
+        output_used_[batch_index] = 0;
     }
 
     if (requests.empty()) {
@@ -441,7 +441,7 @@ bool TokenizedDataLoader::GetTokenArray(
         const uint32_t* decompressed_ptr = reinterpret_cast<const uint32_t*>( decompressor->Result.data() );
         const uint32_t decompressed_words = decompressor->Result.size() / 4;
 
-        uint32_t used = output_used_[batch_index];
+        const uint32_t used = output_used_[batch_index];
         const uint32_t available = decompressed_words - used;
         if (available <= 0) {
             continue;
