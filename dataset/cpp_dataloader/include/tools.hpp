@@ -100,6 +100,7 @@ private:
 #define LOG_INFO() Logger::getInstance().Info()
 #define LOG_WARN() Logger::getInstance().Warn()
 #define LOG_ERROR() Logger::getInstance().Error()
+#define LOG_TERMINATE() Logger::getInstance().Terminate();
 
 
 //------------------------------------------------------------------------------
