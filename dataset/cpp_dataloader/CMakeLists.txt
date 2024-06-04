@@ -1,8 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 project(cpp_dataloader C CXX)
 
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -20,6 +18,7 @@ set(CMAKE_CXX_STANDARD 11)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
 file(GLOB_RECURSE URING_SRC_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/uring/*.c"
@@ -80,6 +79,9 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     Threads::Threads
 )
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "") # remove lib prefix
+set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
+
+message(STATUS "CMAKE_LIBRARY_OUTPUT_DIRECTORY: ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
 
 # Test executable test_compressor
 add_executable(test_compressor tests/test_compressor.cpp)

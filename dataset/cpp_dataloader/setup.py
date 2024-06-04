@@ -18,9 +18,8 @@ class CMakeBuild(build_ext):
         extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
-            f"-DPYTHON_EXECUTABLE={sys.executable}"
+            #f"-DPYTHON_EXECUTABLE={sys.executable}"
         ]
-        print(f"extdir = {extdir}")
 
         cfg = "Debug" if self.debug else "Release"
         build_args = ["--config", cfg]
@@ -41,4 +40,5 @@ setup(
     package_data={
         'cpp_dataloader': ['cpp_dataloader.so'],
     },
+    include_package_data=True,
 )

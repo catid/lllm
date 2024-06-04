@@ -1,0 +1,11 @@
+include CMakeLists.txt
+include *.cpp
+include *.hpp
+recursive-include include *
+recursive-include src *
+recursive-include uring *
+recursive-include zstd *
+recursive-include cityhash *
+recursive-include ryml *
+recursive-include cpppath *
+recursive-include tests *

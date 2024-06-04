@@ -1,11 +1,13 @@
 import ctypes
 import numpy as np
-import pkg_resources
+import os, pkg_resources
 
-# Get the directory of the current script
-lib_path = "/home/catid/sources/lllm/dataset/cpp_dataloader/cpp_dataloader.so"
+# Use pkg_resources to get the path to the shared library
+lib_path = pkg_resources.resource_filename('cpp_dataloader', 'cpp_dataloader.so')
 
-print(f"Library path: {lib_path}")
+# Ensure the library path is correct and exists
+if not os.path.exists(lib_path):
+    raise FileNotFoundError(f"Shared library not found at {lib_path}")
 
 # Load the shared library
 lib = ctypes.CDLL(lib_path)
