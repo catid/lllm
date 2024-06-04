@@ -41,8 +41,7 @@ if __name__ == "__main__":
         
         loader = DataLoader("test_data", rank=0, local_ranks=1)
         loader.start_epoch(0, 0, 32, 8192)
-        context_size = 8192  # Define the context size
-        batch, is_cont = loader.get_micro_batch(context_size)
+        batch, is_cont = loader.get_micro_batch()
         print("Batch:", batch)
         print("Is continuation:", is_cont)
         
