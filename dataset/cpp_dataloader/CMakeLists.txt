@@ -4,42 +4,35 @@ project(cpp_dataloader C CXX)
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
 
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Debug) #FIXME: Release
+    set(CMAKE_BUILD_TYPE Release)
 endif()
 
+message(STATUS "CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
+
 if(MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
 else()
-    set(CMAKE_CXX_FLAGS "-Wall -Wextra")
-    set(CMAKE_CXX_FLAGS_DEBUG "-fsanitize=address -g -O0 -march=native")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address -g -O0 -march=native")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
 endif()
 
 set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
-file(GLOB_RECURSE URING_SRC_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/uring/*.c"
-)
-
-file(GLOB_RECURSE URING_HEADER_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/uring/*.h"
-)
-
-file(GLOB_RECURSE ZSTD_SRC_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/zstd/*.c"
-)
-
-file(GLOB_RECURSE ZSTD_HEADER_FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/zstd/*.h"
-)
+# Third-party source files
+file(GLOB_RECURSE URING_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/uring/*.c")
+file(GLOB_RECURSE URING_HEADER_FILES "${CMAKE_CURRENT_SOURCE_DIR}/uring/*.h")
+file(GLOB_RECURSE ZSTD_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/zstd/*.c")
+file(GLOB_RECURSE ZSTD_HEADER_FILES "${CMAKE_CURRENT_SOURCE_DIR}/zstd/*.h")
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
     enable_language(ASM)
-    file(GLOB_RECURSE ZSTD_ASM_FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/zstd/*.S")
+    file(GLOB_RECURSE ZSTD_ASM_FILES "${CMAKE_CURRENT_SOURCE_DIR}/zstd/*.S")
     list(APPEND ZSTD_SRC_FILES ${ZSTD_ASM_FILES})
 endif()
 
@@ -65,8 +58,6 @@ add_library(${PROJECT_NAME} SHARED
 target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/uring/include
-)
-target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/ryml
     ${CMAKE_CURRENT_SOURCE_DIR}/cityhash
     ${CMAKE_CURRENT_SOURCE_DIR}/cpppath
@@ -83,30 +74,17 @@ set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMA
 
 message(STATUS "CMAKE_LIBRARY_OUTPUT_DIRECTORY: ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
 
-# Test executable test_compressor
-add_executable(test_compressor tests/test_compressor.cpp)
-target_link_libraries(test_compressor ${PROJECT_NAME})
+# Helper macro to add test executables
+macro(add_test_executable name)
+    add_executable(${name} tests/${name}.cpp)
+    target_link_libraries(${name} ${PROJECT_NAME})
+endmacro()
 
-# Test executable test_mapped_file
-add_executable(test_mapped_file tests/test_mapped_file.cpp)
-target_link_libraries(test_mapped_file ${PROJECT_NAME})
-
-# Test executable test_uring_file
-add_executable(test_uring_file tests/test_uring_file.cpp)
-target_link_libraries(test_uring_file ${PROJECT_NAME})
-
-# Test executable test_worker_pool
-add_executable(test_worker_pool tests/test_worker_pool.cpp)
-target_link_libraries(test_worker_pool ${PROJECT_NAME})
-
-# Test executable test_tools
-add_executable(test_tools tests/test_tools.cpp)
-target_link_libraries(test_tools ${PROJECT_NAME})
-
-# Test executable test_data_prep
-add_executable(test_data_prep tests/test_data_prep.cpp)
-target_link_libraries(test_data_prep ${PROJECT_NAME})
-
-# Test executable test_data_loader
-add_executable(test_data_loader tests/test_data_loader.cpp)
-target_link_libraries(test_data_loader ${PROJECT_NAME})
+# Add test executables
+add_test_executable(test_compressor)
+add_test_executable(test_mapped_file)
+add_test_executable(test_uring_file)
+add_test_executable(test_worker_pool)
+add_test_executable(test_tools)
+add_test_executable(test_data_prep)
+add_test_executable(test_data_loader)
