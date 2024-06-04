@@ -22,7 +22,7 @@ if __name__ == "__main__":
         
         prep = DataPreparation(data_path)
         
-        for _ in range(1000):
+        for _ in range(4000):
             num_tokens = random.randint(1, 20000)
             tokens = [random.randint(0, 128000) for _ in range(num_tokens)]
             prep.write_tokenized_text(tokens)
@@ -53,7 +53,7 @@ if __name__ == "__main__":
         start_time = time.time()
         
         loader = DataLoader(data_path, rank=0, local_ranks=2)
-        loader.start_epoch(0, 0, 32, 8192)
+        loader.start_epoch(0, 0, 128, 8192)
 
         while True:
             batch, is_cont = loader.get_micro_batch()

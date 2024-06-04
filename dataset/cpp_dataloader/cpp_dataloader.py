@@ -85,7 +85,7 @@ class DataLoader:
                                                   is_continuation.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)))
         if not success or micro_batch_size.value <= 0 or num_tokens.value <= 0:
             return None, None
-        return output_array[:micro_batch_size.value, :num_tokens.value], is_continuation[:self.microbatch_size]
+        return output_array[:micro_batch_size.value, :num_tokens.value], is_continuation[:micro_batch_size.value]
 
 class DataPreparation:
     def __init__(self, data_folder_path):

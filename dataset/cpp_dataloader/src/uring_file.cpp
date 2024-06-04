@@ -177,6 +177,7 @@ void AsyncUringReader::Close() {
 
     if (fd >= 0) {
         close(fd);
+        fd = -1;
     }
 
     if (inflight > 0) {
