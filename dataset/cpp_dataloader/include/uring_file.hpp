@@ -22,11 +22,7 @@
 using ReadCallback = std::function<void(uint8_t* buffer, uint32_t bytes)>;
 
 struct io_data {
-    ~io_data() {
-        if (buffer) {
-            free(buffer);
-        }
-    }
+    ~io_data();
 
     int buffer_bytes = 0;
     uint8_t* buffer = nullptr;
@@ -39,10 +35,13 @@ struct io_data {
 
 class IoReuseAllocator {
 public:
+    // Must be called before any other methods
     void SetAlignBytes(int align_bytes);
 
     std::shared_ptr<io_data> Allocate(int bytes);
     void Free(io_data* data);
+
+    void Clear();
 
 private:
     int align_bytes_ = 4096;

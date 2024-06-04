@@ -25,7 +25,7 @@ bool test_data_loader() {
 
     uint64_t seed0 = 0;
     uint64_t seed1 = 0;
-    uint32_t k_micro_batch_size = 16;
+    uint32_t k_micro_batch_size = 64;
     uint32_t k_context_size = 8192;
 
     loader.StartEpoch(seed0, seed1, k_micro_batch_size, k_context_size);

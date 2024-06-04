@@ -10,7 +10,7 @@ endif()
 if(MSVC)
 else()
     set(CMAKE_CXX_FLAGS "-Wall -Wextra")
-    set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -march=native")
+    set(CMAKE_CXX_FLAGS_DEBUG "-fsanitize=address -g -O0 -march=native")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native")
 endif()
 

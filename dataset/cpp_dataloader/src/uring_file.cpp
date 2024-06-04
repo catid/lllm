@@ -19,10 +19,49 @@
 
 
 //------------------------------------------------------------------------------
+// Aligned Malloc
+
+static void* arb_align_malloc(size_t alignment, size_t size) {
+    // Ensure alignment is greater than zero
+    if (alignment == 0) return nullptr;
+
+    // Allocate enough memory to ensure we can find an aligned block
+    // Add alignment to account for alignment adjustment and sizeof(void*) to store the original pointer
+    size_t extra_space = alignment + sizeof(void*);
+    void* original = std::calloc(size + extra_space, 1);
+
+    if (!original) return nullptr; // Allocation failed
+
+    // Find the aligned memory address
+    uintptr_t raw_address = reinterpret_cast<uintptr_t>(original) + sizeof(void*);
+    uintptr_t aligned_address = (raw_address + alignment - 1) / alignment * alignment;
+
+    // Store the original pointer just before the aligned address
+    reinterpret_cast<void**>(aligned_address)[-1] = original;
+
+    return reinterpret_cast<void*>(aligned_address);
+}
+
+static void arb_align_free(void* ptr) {
+    if (ptr) {
+        // Retrieve the original pointer stored before the aligned address
+        void* original = reinterpret_cast<void**>(ptr)[-1];
+        std::free(original);
+    }
+}
+
+
+//------------------------------------------------------------------------------
 // IoReuseAllocator
+
+io_data::~io_data() {
+    arb_align_free(buffer);
+}
 
 void IoReuseAllocator::SetAlignBytes(int align_bytes)
 {
+    Clear();
+
     align_bytes_ = align_bytes;
 }
 
@@ -35,7 +74,7 @@ std::shared_ptr<io_data> IoReuseAllocator::Allocate(int bytes) {
         data = Freed.back();
         Freed.pop_back();
         if (data->buffer_bytes < bytes) {
-            free(data->buffer);
+            arb_align_free(data->buffer);
             data->buffer = nullptr;
         }
     } else {
@@ -43,7 +82,7 @@ std::shared_ptr<io_data> IoReuseAllocator::Allocate(int bytes) {
     }
 
     if (!data->buffer) {
-        data->buffer = (uint8_t*)aligned_alloc(align_bytes_, bytes);
+        data->buffer = (uint8_t*)arb_align_malloc(align_bytes_, bytes);
         if (!data->buffer) {
             return nullptr;
         }
@@ -70,6 +109,13 @@ void IoReuseAllocator::Free(io_data* data) {
     }
 
     LOG_ERROR() << "Failed to free io_data: Not found in Used list";
+}
+
+void IoReuseAllocator::Clear() {
+    std::lock_guard<std::mutex> lock(Lock);
+
+    Freed.clear();
+    Used.clear();
 }
 
 
