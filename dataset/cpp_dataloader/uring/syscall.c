@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 
 #include "syscall.h"
-#include "uring.h":
+#include "uring.h"
 
 int io_uring_enter(unsigned int fd, unsigned int to_submit,
 		   unsigned int min_complete, unsigned int flags, sigset_t *sig)

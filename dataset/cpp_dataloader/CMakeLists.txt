@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(cpp_dataloader C CXX)
 
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -18,8 +20,6 @@ set(CMAKE_CXX_STANDARD 11)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-
-find_package(PythonLibs REQUIRED)
 
 file(GLOB_RECURSE URING_SRC_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/uring/*.c"
@@ -73,10 +73,10 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/cpppath
     ${CMAKE_CURRENT_SOURCE_DIR}/worker_pool
     ${CMAKE_CURRENT_SOURCE_DIR}/zstd
-    ${PYTHON_INCLUDE_DIRS}
+    ${Python3_INCLUDE_DIRS}
 )
 target_link_libraries(${PROJECT_NAME} PUBLIC
-    ${PYTHON_LIBRARIES}
+    ${Python3_LIBRARIES}
     Threads::Threads
 )
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "") # remove lib prefix
