@@ -122,7 +122,10 @@ private:
 
     FileEndCache EndCache;
 
+    std::mutex SubmitLock;
+
     io_data* HandleCqe(struct io_uring_cqe* cqe);
 
     void Loop();
+    void HandleNext();
 };

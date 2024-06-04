@@ -224,12 +224,7 @@ void AsyncUringReader::Close() {
     JoinThread(Thread);
 
     while (inflight > 0) {
-        struct io_uring_cqe* cqe = nullptr;
-        io_uring_wait_cqe(&ring, &cqe);
-        io_data* data = HandleCqe(cqe);
-        io_uring_cqe_seen(&ring, cqe);
-
-        Allocator.Free(data);
+        HandleNext();
     }
 
     if (ring_initialized) {
@@ -278,9 +273,10 @@ bool AsyncUringReader::Read(
 
     // Round offset down to the nearest 512-byte block
     // Then round read length up to the nearest 512-byte block
-    uint32_t app_offset = (uint32_t)offset & 511;
-    uint64_t request_offset = offset - app_offset;
-    uint32_t request_bytes = ((bytes + app_offset + 511) & ~511);
+    const uint32_t app_offset = (uint32_t)offset % 512;
+    const uint64_t request_offset = offset - app_offset;
+    const uint32_t request_blocks = (bytes + app_offset + 512 - 1) / 512;
+    const uint32_t request_bytes = request_blocks * 512;
 
     auto data = Allocator.Allocate(request_bytes);
     if (!data) {
@@ -291,17 +287,21 @@ bool AsyncUringReader::Read(
     data->app_offset = app_offset;
     data->app_bytes = bytes;
 
-    struct io_uring_sqe* sqe = io_uring_get_sqe(&ring);
-    if (!sqe) {
-        return false;
-    }
+    {
+        std::unique_lock<std::mutex> lock(SubmitLock);
 
-    io_uring_prep_read(sqe, fd, data->buffer, request_bytes, request_offset);
-    io_uring_sqe_set_data(sqe, data.get());
-    int r = io_uring_submit(&ring);
-    if (r < 0) {
-        LOG_ERROR() << "AsyncUringReader: io_uring_submit failed: " << r << " (" << strerror(-r) << ")";
-        return false;
+        struct io_uring_sqe* sqe = io_uring_get_sqe(&ring);
+        if (!sqe) {
+            return false;
+        }
+
+        io_uring_prep_read(sqe, fd, data->buffer, request_bytes, request_offset);
+        io_uring_sqe_set_data(sqe, data.get());
+        int r = io_uring_submit(&ring);
+        if (r < 0) {
+            LOG_ERROR() << "AsyncUringReader: io_uring_submit failed: " << r << " (" << strerror(-r) << ")";
+            return false;
+        }
     }
 
     bool needs_notify = false;
@@ -326,17 +326,20 @@ void AsyncUringReader::Loop() {
             Condition.wait(lock, [this]{ return Terminated || inflight > 0; });
         }
 
-        while (inflight > 0) {
-            if (Terminated) {
-                break;
-            }
-
-            struct io_uring_cqe* cqe = nullptr;
-            io_uring_wait_cqe(&ring, &cqe);
-
-            HandleCqe(cqe);
-
-            io_uring_cqe_seen(&ring, cqe);
+        while (!Terminated && inflight > 0) {
+            HandleNext();
         }
     }
+}
+
+void AsyncUringReader::HandleNext()
+{
+    struct io_uring_cqe* cqe = nullptr;
+    io_uring_wait_cqe(&ring, &cqe);
+
+    io_data* data = HandleCqe(cqe);
+
+    io_uring_cqe_seen(&ring, cqe);
+
+    Allocator.Free(data);
 }
