@@ -54,16 +54,18 @@ class DataLoader:
     def start_epoch(self, seed0, seed1, micro_batch_size, context_size):
         lib.data_loader_start_epoch(self.data_loader, seed0, seed1, micro_batch_size, context_size)
 
-    def get_micro_batch(self):
+    def get_micro_batch(self, context_size):
         micro_batch_size = ctypes.c_uint32()
         num_tokens = ctypes.c_uint32()
         output_array = np.empty(context_size, dtype=np.uint32)
         is_continuation = ctypes.c_uint8()
-        success = lib.data_loader_get_micro_batch(self.data_loader,
-                                                  ctypes.byref(micro_batch_size),
-                                                  ctypes.byref(num_tokens),
-                                                  output_array.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
-                                                  ctypes.byref(is_continuation))
+        success = lib.data_loader_get_micro_batch(
+            self.data_loader,
+            ctypes.byref(micro_batch_size),
+            ctypes.byref(num_tokens),
+            output_array.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
+            ctypes.byref(is_continuation)
+        )
         if not success:
             raise RuntimeError("Failed to get micro batch")
         return output_array[:num_tokens.value].reshape(-1, micro_batch_size.value), bool(is_continuation.value)
