@@ -151,7 +151,7 @@ bool TokenizedDataPrep::WriteTokenizedText(
             worker_error_ = true;
         }
         allocator_.Free(buffer);
-    }, max_active_tasks);
+    }, max_active_tasks, true/*round robin*/);
 
     return !worker_error_;
 }

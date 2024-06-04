@@ -129,9 +129,18 @@ void WorkerPool::WaitForTasks()
     }
 }
 
-void WorkerPool::QueueTask(TaskFn task, int max_active_tasks)
+void WorkerPool::QueueTask(TaskFn task, int max_active_tasks, bool round_robin)
 {
     std::lock_guard<std::mutex> lock(Lock);
+
+    // Pick first round-robin worker
+    int next_task_index = 0;
+    if (round_robin) {
+        next_task_index = RoundRobinIndex++;
+        if (RoundRobinIndex >= (int)Workers.size()) {
+            RoundRobinIndex = 0;
+        }
+    }
 
     for (;;) {
         // Find the least busy worker.
@@ -139,17 +148,23 @@ void WorkerPool::QueueTask(TaskFn task, int max_active_tasks)
         int best_i = -1;
 
         for (int i = 0; i < (int)Workers.size(); ++i) {
-            int active_tasks = Workers[i]->GetActiveTaskCount();
+            // Pick next worker index
+            int task_index = next_task_index++;
+            if (task_index >= (int)Workers.size()) {
+                task_index = 0;
+            }
+
+            int active_tasks = Workers[task_index]->GetActiveTaskCount();
 
             // Any idle worker is fine.
             if (active_tasks <= 0) {
-                Workers[i]->QueueTask(task);
+                Workers[task_index]->QueueTask(task);
                 return;
             }
 
             if (best_active_tasks < 0 || active_tasks < best_active_tasks) {
                 best_active_tasks = active_tasks;
-                best_i = i;
+                best_i = task_index;
             }
         }
 

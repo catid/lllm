@@ -61,7 +61,12 @@ class DataLoader:
             raise RuntimeError("Failed to create data loader")
 
     def __del__(self):
-        lib.data_loader_destroy(self.data_loader)
+        self.destroy()
+
+    def destroy(self):
+        if self.data_loader:
+            lib.data_loader_destroy(self.data_loader)
+            self.data_loader = None
 
     def start_epoch(self, seed0, seed1, micro_batch_size, context_size):
         self.context_size = context_size
@@ -78,9 +83,9 @@ class DataLoader:
                                                   ctypes.byref(num_tokens),
                                                   output_array.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
                                                   is_continuation.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)))
-        if not success:
-            raise RuntimeError("Failed to get micro batch")
-        return output_array[:num_tokens.value].reshape(-1, micro_batch_size.value), is_continuation[:num_tokens.value]
+        if not success or micro_batch_size.value <= 0 or num_tokens.value <= 0:
+            return None, None
+        return output_array[:micro_batch_size.value, :num_tokens.value], is_continuation[:self.microbatch_size]
 
 class DataPreparation:
     def __init__(self, data_folder_path):

@@ -60,9 +60,10 @@ public:
     int GetWorkerCount() const { return Workers.size(); }
 
     // max_active_tasks: 0 means no limit. Otherwise, block until queue is short
-    void QueueTask(TaskFn task, int max_active_tasks = 0);
+    void QueueTask(TaskFn task, int max_active_tasks = 0, bool round_robin = false);
 
 private:
     std::mutex Lock;
     std::vector<std::shared_ptr<ThreadWorker>> Workers;
+    int RoundRobinIndex = 0;
 };

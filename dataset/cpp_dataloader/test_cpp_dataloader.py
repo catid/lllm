@@ -16,14 +16,13 @@ data_path = "python_test_data"
 if __name__ == "__main__":
     create_folder_if_not_exists(data_path)
 
-    print("Preparing random tokenized dataset (~30 seconds)...")
+    print("Preparing random tokenized dataset...")
     try:
         start_time = time.time()
         
         prep = DataPreparation(data_path)
         
-        # Add random tokens from 0..128000 for 1-20000 tokens per write, and at least 1000 of these
-        for _ in range(10000):
+        for _ in range(1000):
             num_tokens = random.randint(1, 20000)
             tokens = [random.randint(0, 128000) for _ in range(num_tokens)]
             prep.write_tokenized_text(tokens)
@@ -55,9 +54,16 @@ if __name__ == "__main__":
         
         loader = DataLoader(data_path, rank=0, local_ranks=2)
         loader.start_epoch(0, 0, 32, 8192)
-        batch, is_cont = loader.get_micro_batch()
-        print("Batch:", batch)
-        print("Is continuation:", is_cont)
+
+        while True:
+            batch, is_cont = loader.get_micro_batch()
+            if batch is None:
+                print("Dataset exhausted")
+                break
+            print("Batch:", batch)
+            print("Is continuation:", is_cont)
+
+        loader.destroy()
 
         end_time = time.time()
         print(f"DataLoader time: {end_time - start_time:.2f} seconds")

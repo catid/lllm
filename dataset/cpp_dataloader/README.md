@@ -6,15 +6,18 @@ The scripts convert downloaded HuggingFace datasets into this format by tokenizi
 
 ## Setup
 
-Build the cpp_dataloader package:
+Install the `cpp_dataloader` pip package:
 
 ```bash
 sudo apt install build-essential cmake
 
-pip install build
+./install.sh
+```
 
-rm -rf build dist cpp_dataloader.egg-info && pip uninstall cpp_dataloader -y
-python -m build && pip install --force-reinstall dist/*.whl
+Verify that it is working:
+
+```bash
+python python test_cpp_dataloader.py
 ```
 
 ## Thanks
