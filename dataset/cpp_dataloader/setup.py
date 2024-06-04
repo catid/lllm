@@ -28,7 +28,11 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", "--build", self.build_temp] + build_args)
 
 setup(
-    name="dataloader",
-    ext_modules=[CMakeExtension("dataloader")],
-    cmdclass={"build_ext": CMakeBuild}
+    name="cpp_dataloader",
+    version="0.0.1",
+    ext_modules=[CMakeExtension("cpp_dataloader")],
+    cmdclass={"build_ext": CMakeBuild},
+    package_data={
+        'my_package': ['cpp_dataloader.so'],
+    },
 )

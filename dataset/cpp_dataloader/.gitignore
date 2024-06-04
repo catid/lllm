@@ -2,3 +2,4 @@ build
 dist
 test_data
 test_file.bin
+cpp_dataloader.egg-info

@@ -1,3 +1,3 @@
-from dataloader import write_token_arrays
+from cpp_dataloader import DataLoader, DataPreparation, verify_dataset
 
-__all__ = ['write_token_arrays']
+__all__ = ['DataLoader', 'DataPreparation', 'verify_dataset']

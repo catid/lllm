@@ -79,6 +79,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     ${PYTHON_LIBRARIES}
     Threads::Threads
 )
+set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "") # remove lib prefix
 
 # Test executable test_compressor
 add_executable(test_compressor tests/test_compressor.cpp)

@@ -22,7 +22,10 @@ extern "C" {
 // Data Loader
 
 // Create or destroy a data loader context object
-void* data_loader_create(const char* index_file);
+void* data_loader_create(
+    const char* index_file,
+    uint32_t rank,
+    uint32_t local_ranks);
 void data_loader_destroy(void* data_loader);
 
 // Start a new epoch
