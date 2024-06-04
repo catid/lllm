@@ -47,9 +47,6 @@ lib.data_prep_destroy.restype = None
 lib.data_prep_write_tokenized_text.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32]
 lib.data_prep_write_tokenized_text.restype = ctypes.c_bool
 
-lib.data_prep_finalize.argtypes = [ctypes.c_void_p]
-lib.data_prep_finalize.restype = None
-
 # Data Verification
 lib.data_verify.argtypes = [ctypes.c_char_p]
 lib.data_verify.restype = ctypes.c_bool
@@ -94,7 +91,7 @@ class DataPreparation:
             raise RuntimeError("Failed to create data preparation")
 
     def __del__(self):
-        lib.data_prep_destroy(self.data_prep)
+        self.destroy()
 
     def write_tokenized_text(self, tokenized_text):
         tokenized_text = np.asarray(tokenized_text, dtype=np.uint32)
@@ -102,8 +99,10 @@ class DataPreparation:
         if not success:
             raise RuntimeError("Failed to write tokenized text")
 
-    def finalize(self):
-        lib.data_prep_finalize(self.data_prep)
+    def destroy(self):
+        if self.data_prep:
+            lib.data_prep_destroy(self.data_prep)
+            self.data_prep = None
 
 class DataVerifier:
     @staticmethod

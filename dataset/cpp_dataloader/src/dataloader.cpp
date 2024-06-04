@@ -79,11 +79,6 @@ bool data_prep_write_tokenized_text(
     return prep->WriteTokenizedText(tokenized_text, text_length);
 }
 
-void data_prep_finalize(void* data_prep) {
-    TokenizedDataPrep* prep = static_cast<TokenizedDataPrep*>(data_prep);
-    prep->Stop();
-}
-
 
 //------------------------------------------------------------------------------
 // Data Verification

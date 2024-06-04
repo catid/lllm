@@ -27,7 +27,7 @@ if __name__ == "__main__":
             tokens = [random.randint(0, 128000) for _ in range(num_tokens)]
             prep.write_tokenized_text(tokens)
         
-        prep.finalize()
+        prep.destroy()
         
         end_time = time.time()
         print(f"DataPreparation time: {end_time - start_time:.2f} seconds")

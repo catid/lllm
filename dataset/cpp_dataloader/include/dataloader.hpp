@@ -47,12 +47,11 @@ bool data_loader_get_micro_batch(
 
 void* data_prep_create(const char* data_folder_path);
 void data_prep_destroy(void* data_prep);
+
 bool data_prep_write_tokenized_text(
     void* data_prep,
     const uint32_t* tokenized_text,
     uint32_t text_length);
-
-void data_prep_finalize(void* data_prep);
 
 
 //------------------------------------------------------------------------------
