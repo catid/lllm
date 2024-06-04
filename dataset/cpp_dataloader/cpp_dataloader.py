@@ -3,7 +3,7 @@ import numpy as np
 import pkg_resources
 
 # Get the directory of the current script
-lib_path = pkg_resources.resource_filename('cpp_dataloader', 'cpp_dataloader.so')
+lib_path = "/home/catid/sources/lllm/dataset/cpp_dataloader/cpp_dataloader.so"
 
 print(f"Library path: {lib_path}")
 
