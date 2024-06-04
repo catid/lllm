@@ -23,14 +23,18 @@
 
 static void* arb_align_malloc(size_t alignment, size_t size) {
     // Ensure alignment is greater than zero
-    if (alignment == 0) return nullptr;
+    if (alignment == 0) {
+        return nullptr;
+    }
 
     // Allocate enough memory to ensure we can find an aligned block
     // Add alignment to account for alignment adjustment and sizeof(void*) to store the original pointer
     size_t extra_space = alignment + sizeof(void*);
     void* original = std::calloc(size + extra_space, 1);
 
-    if (!original) return nullptr; // Allocation failed
+    if (!original) {
+        return nullptr; // Allocation failed
+    }
 
     // Find the aligned memory address
     uintptr_t raw_address = reinterpret_cast<uintptr_t>(original) + sizeof(void*);

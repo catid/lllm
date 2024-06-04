@@ -56,7 +56,7 @@
 struct ReadRequest {
     uint32_t batch_index = 0;
     uint32_t shard_index = 0;
-    uint32_t shard_datum_index = 0;
+    uint32_t shard_span_index = 0;
 };
 
 

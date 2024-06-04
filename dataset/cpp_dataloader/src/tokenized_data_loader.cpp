@@ -122,13 +122,28 @@ uint64_t DataShardContext::GetSpan(
     uint32_t span_index,
     uint32_t& bytes_out)
 {
-    uint32_t index = EpochSpanData[span_index];
-    const uint8_t* span_data = IndexFile->GetData() + index * 4;
-    uint32_t start = read_uint32_le(span_data);
-    uint32_t end = read_uint32_le(span_data + 4);
-    uint32_t span_bytes = end - start;
+    if (span_index >= NumSpans) {
+        LOG_ERROR() << "Internal error: Requested span index " << span_index << " is out of range";
+        return 0;
+    }
 
-    bytes_out = span_bytes;
+    uint32_t index = EpochSpanData[span_index];
+
+    if (index * 4 >= IndexFile->GetSize()) {
+        LOG_ERROR() << "Internal error: Requested index " << index << " is out of range";
+        return 0;
+    }
+
+    const uint8_t* span_data = IndexFile->GetData() + index * 4;
+    const uint32_t start = read_uint32_le(span_data);
+    const uint32_t end = read_uint32_le(span_data + 4);
+
+    if (start >= end) {
+        LOG_ERROR() << "Internal error: Span index " << span_index << " has invalid start=" << start << " end=" << end;
+        return 0;
+    }
+
+    bytes_out = end - start;
     return start;
 }
 
@@ -331,7 +346,7 @@ void TokenizedDataLoader::Prefill() {
             // Read offsets from mmap index file
             uint32_t bytes = 0;
             uint64_t offset = shards_[request.shard_index]->GetSpan(
-                /*request.shard_datum_index,*/0, // FIXME: REMOVE THIS
+                request.shard_span_index,
                 bytes);
 
             shards_[request.shard_index]->DataFile->Read(offset, bytes,
@@ -346,7 +361,7 @@ void TokenizedDataLoader::Prefill() {
 
                 auto& decompressor = decompressors_[request.batch_index];
                 if (!decompressor->Decompress(data, bytes, kCompressorByteStride)) {
-                    LOG_ERROR() << "Failed to decompress data for shard=" << request.shard_index << " index=" << request.shard_datum_index;
+                    LOG_ERROR() << "Failed to decompress data for shard=" << request.shard_index << " index=" << request.shard_span_index;
                     worker_error_ = true;
                 }
 
@@ -384,7 +399,7 @@ bool TokenizedDataLoader::NextSpan(ReadRequest& request) {
             shard->EpochNextSpan = shard_span_index + 1;
 
             request.shard_index = shard_index;
-            request.shard_datum_index = shard_span_index;
+            request.shard_span_index = shard_span_index;
             return true;
         }
     }

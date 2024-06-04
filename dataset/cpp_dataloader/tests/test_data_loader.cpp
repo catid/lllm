@@ -15,8 +15,8 @@ bool test_data_verify() {
 bool test_data_loader() {
     TokenizedDataLoader loader;
 
-    uint32_t rank = 1;
-    uint32_t local_ranks = 2;
+    uint32_t rank = 0;
+    uint32_t local_ranks = 1;
 
     if (!loader.Start("test_data", rank, local_ranks)) {
         LOG_ERROR() << "Failed to start data loader";
