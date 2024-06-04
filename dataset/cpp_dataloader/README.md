@@ -20,6 +20,29 @@ Verify that it is working:
 python python test_cpp_dataloader.py
 ```
 
+## Debugging
+
+There are a few unit tests that can be run to verify the correctness of the code.  To run them, first build the project:
+
+```bash
+sudo apt install build-essential cmake
+
+rm -rf build
+mkdir build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Debug ..
+make -j
+
+./test_compressor
+./test_tools
+./test_worker_pool
+./test_mapped_file
+#./test_uring_file
+
+./test_data_prep
+./test_data_loader
+```
+
 ## Thanks
 
 Latest versions of thirdparty libraries are included:

@@ -50,9 +50,9 @@ bool test_data_loader() {
         total_spans += micro_batch_size;
 
         LOG_INFO() << "Batch retrieved: micro_batch_size=" << micro_batch_size << ", num_tokens=" << num_tokens << ", dt_usec=" << dt_usec;
-        LOG_INFO() << "Sample data: " << output_batch[0] << " (continuation=" << (int)is_continuation[0] << ")";
+        //LOG_INFO() << "Sample data: " << output_batch[0] << " (continuation=" << (int)is_continuation[0] << ")";
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        //std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
     LOG_INFO() << "Total spans processed: " << total_spans;
