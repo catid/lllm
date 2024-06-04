@@ -12,6 +12,7 @@
 // Constants
 
 static const int kCompressionLevel = 1;
+static const int kMaxBytes = 0x00ffffff;
 
 
 //------------------------------------------------------------------------------
@@ -19,7 +20,7 @@ static const int kCompressionLevel = 1;
 
 bool Compressor::Compress(const void* data, int bytes, int byte_stride)
 {
-    if (bytes > 0x00ffffff || bytes < 0) {
+    if (bytes > kMaxBytes || bytes < 0) {
         LOG_ERROR() << "Compressor: Data too large: bytes=" << bytes;
         return false;
     }
