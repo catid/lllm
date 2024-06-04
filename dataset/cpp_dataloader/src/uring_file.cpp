@@ -77,37 +77,47 @@ std::shared_ptr<io_data> IoReuseAllocator::Allocate(int bytes) {
     if (!Freed.empty()) {
         data = Freed.back();
         Freed.pop_back();
-        if (data->buffer_bytes < bytes) {
-            arb_align_free(data->buffer);
-            data->buffer = nullptr;
-        }
     } else {
         data = std::make_shared<io_data>();
     }
 
-    if (!data->buffer) {
+    if (!data->buffer || data->buffer_bytes < bytes) {
+        arb_align_free(data->buffer);
+
         data->buffer = (uint8_t*)arb_align_malloc(align_bytes_, bytes);
         if (!data->buffer) {
             return nullptr;
         }
+        data->buffer_bytes = bytes;
     }
 
     Used.push_back(data);
 
-    data->buffer_bytes = bytes;
+    data->RefCount++;
     data->callback = nullptr;
     return data;
 }
 
 void IoReuseAllocator::Free(io_data* data) {
+    if (!data) {
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(Lock);
 
     for (auto it = Used.begin(); it != Used.end(); ++it) {
         if (it->get() == data) {
-            auto shared_ptr = *it;
-            Freed.push_back(shared_ptr);
-            Used.erase(it);
             data->callback = nullptr;
+            data->RefCount--;
+            if (data->RefCount != 0) {
+                LOG_ERROR() << "IoReuseAllocator: RefCount != 0 on freed data";
+                return;
+            }
+
+            Freed.push_back(*it);
+
+            Used.erase(it);
+
             return;
         }
     }
@@ -216,8 +226,10 @@ void AsyncUringReader::Close() {
     while (inflight > 0) {
         struct io_uring_cqe* cqe = nullptr;
         io_uring_wait_cqe(&ring, &cqe);
-        HandleCqe(cqe);
+        io_data* data = HandleCqe(cqe);
         io_uring_cqe_seen(&ring, cqe);
+
+        Allocator.Free(data);
     }
 
     if (ring_initialized) {
@@ -235,12 +247,12 @@ void AsyncUringReader::Close() {
     }
 }
 
-void AsyncUringReader::HandleCqe(struct io_uring_cqe* cqe) {
+io_data* AsyncUringReader::HandleCqe(struct io_uring_cqe* cqe) {
     io_data* data = static_cast<io_data*>(io_uring_cqe_get_data(cqe));
 
     if (!data) {
         LOG_ERROR() << "AsyncUringReader: Invalid data pointer";
-        return;
+        return nullptr;
     }
 
     if (cqe->res < 0 || cqe->res + data->app_offset < data->app_bytes) {
@@ -250,9 +262,9 @@ void AsyncUringReader::HandleCqe(struct io_uring_cqe* cqe) {
         data->callback(data->buffer + data->app_offset, data->app_bytes);
     }
 
-    Allocator.Free(data);
-
     inflight--;
+
+    return data;
 }
 
 bool AsyncUringReader::Read(

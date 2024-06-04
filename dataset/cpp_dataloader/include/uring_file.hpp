@@ -31,6 +31,8 @@ struct io_data {
     uint32_t request_bytes = 0;
     uint32_t app_offset = 0;
     uint32_t app_bytes = 0;
+
+    int RefCount = 0;
 };
 
 class IoReuseAllocator {
@@ -120,7 +122,7 @@ private:
 
     FileEndCache EndCache;
 
-    void HandleCqe(struct io_uring_cqe* cqe);
+    io_data* HandleCqe(struct io_uring_cqe* cqe);
 
     void Loop();
 };

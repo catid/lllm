@@ -602,6 +602,5 @@ bool VerifyDataset(const std::string& data_folder_path)
     double seconds_elapsed = (t1 - t0) / 1000000000.0;
 
     LOG_INFO() << "Verified " << num_files << " files in " << seconds_elapsed << " seconds";
-
     return true;
 }
