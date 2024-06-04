@@ -1,13 +1,23 @@
 import ctypes
 import numpy as np
-import os, pkg_resources
+import os
+import site
 
-# Use pkg_resources to get the path to the shared library
-lib_path = pkg_resources.resource_filename('cpp_dataloader', 'cpp_dataloader.so')
+# Get the path to site-packages
+site_packages_paths = site.getsitepackages()
+
+# Assuming the .so file is in the first site-packages path found
+so_file_name = "cpp_dataloader.so"
+lib_path = None
+for path in site_packages_paths:
+    potential_path = os.path.join(path, so_file_name)
+    if os.path.exists(potential_path):
+        lib_path = potential_path
+        break
 
 # Ensure the library path is correct and exists
-if not os.path.exists(lib_path):
-    raise FileNotFoundError(f"Shared library not found at {lib_path}")
+if not lib_path:
+    raise FileNotFoundError(f"Shared library not found. Please read the cpp_dataloader/README.md instructions.")
 
 # Load the shared library
 lib = ctypes.CDLL(lib_path)
@@ -54,21 +64,23 @@ class DataLoader:
         lib.data_loader_destroy(self.data_loader)
 
     def start_epoch(self, seed0, seed1, micro_batch_size, context_size):
+        self.context_size = context_size
+        self.microbatch_size = micro_batch_size
         lib.data_loader_start_epoch(self.data_loader, seed0, seed1, micro_batch_size, context_size)
 
     def get_micro_batch(self):
         micro_batch_size = ctypes.c_uint32()
         num_tokens = ctypes.c_uint32()
-        output_array = np.empty(context_size, dtype=np.uint32)
-        is_continuation = ctypes.c_uint8()
+        output_array = np.empty((self.microbatch_size, self.context_size), dtype=np.uint32)
+        is_continuation = np.empty(self.microbatch_size, dtype=np.uint8)
         success = lib.data_loader_get_micro_batch(self.data_loader,
                                                   ctypes.byref(micro_batch_size),
                                                   ctypes.byref(num_tokens),
                                                   output_array.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
-                                                  ctypes.byref(is_continuation))
+                                                  is_continuation.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)))
         if not success:
             raise RuntimeError("Failed to get micro batch")
-        return output_array[:num_tokens.value].reshape(-1, micro_batch_size.value), bool(is_continuation.value)
+        return output_array[:num_tokens.value].reshape(-1, micro_batch_size.value), is_continuation[:num_tokens.value]
 
 class DataPreparation:
     def __init__(self, data_folder_path):

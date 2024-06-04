@@ -34,7 +34,7 @@ class CMakeBuild(build_ext):
 
 setup(
     name="cpp_dataloader",
-    version="0.0.1",
+    version="0.1.0",
     ext_modules=[CMakeExtension("cpp_dataloader")],
     cmdclass={"build_ext": CMakeBuild},
     package_data={

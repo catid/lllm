@@ -1,5 +1,6 @@
 build
 dist
 test_data
+python_test_data
 test_file.bin
 cpp_dataloader.egg-info

@@ -551,7 +551,7 @@ bool VerifyDataset(const std::string& data_folder_path)
                 double seconds_elapsed = (t1 - t0) / 1000000000.0;
                 double seconds_remaining = seconds_elapsed / count * (num_files - count);
                 LOG_INFO() << "Verified " << count << "/" << num_files << " files in "
-                    << seconds_elapsed << " seconds (" << seconds_remaining << " remaining)";
+                    << seconds_elapsed << " seconds (~" << seconds_remaining << " remaining)";
             }
         }, max_active_tasks);
 
@@ -567,6 +567,11 @@ bool VerifyDataset(const std::string& data_folder_path)
         LOG_INFO() << "Data verification failed";
         return false;
     }
+
+    uint64_t t1 = GetNsec();
+    double seconds_elapsed = (t1 - t0) / 1000000000.0;
+
+    LOG_INFO() << "Verified " << num_files << " files in " << seconds_elapsed << " seconds";
 
     return true;
 }
