@@ -101,7 +101,7 @@ public:
         uint32_t bytes,
         ReadCallback callback);
 
-    bool IsBusy() const { return inflight > 0; }
+    bool IsBusy() const { return InflightCount > 0; }
 
 private:
     struct io_uring ring{};
@@ -110,7 +110,8 @@ private:
     int fd = -1;
     int block_size_ = 0;
     int read_align_bytes_ = 0;
-    std::atomic<int> inflight = ATOMIC_VAR_INIT(0); 
+
+    std::atomic<int> InflightCount = ATOMIC_VAR_INIT(0); 
 
     IoReuseAllocator Allocator;
 

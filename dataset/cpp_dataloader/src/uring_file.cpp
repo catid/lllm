@@ -207,7 +207,7 @@ bool AsyncUringReader::Open(
     }
     ring_initialized = true;
 
-    inflight = 0;
+    InflightCount = 0;
 
     Terminated = false;
     Thread = std::make_shared<std::thread>(&AsyncUringReader::Loop, this);
@@ -223,7 +223,7 @@ void AsyncUringReader::Close() {
     }
     JoinThread(Thread);
 
-    while (inflight > 0) {
+    while (InflightCount > 0) {
         HandleNext();
     }
 
@@ -237,8 +237,8 @@ void AsyncUringReader::Close() {
         fd = -1;
     }
 
-    if (inflight > 0) {
-        LOG_ERROR() << "AsyncUringReader: Not all inflight requests were completed.  inflight = " << inflight;
+    if (InflightCount > 0) {
+        LOG_ERROR() << "AsyncUringReader: Not all inflight requests were completed.  InflightCount=" << InflightCount;
     }
 }
 
@@ -257,7 +257,7 @@ io_data* AsyncUringReader::HandleCqe(struct io_uring_cqe* cqe) {
         data->callback(data->buffer + data->app_offset, data->app_bytes);
     }
 
-    inflight--;
+    InflightCount--;
 
     return data;
 }
@@ -297,6 +297,7 @@ bool AsyncUringReader::Read(
 
         io_uring_prep_read(sqe, fd, data->buffer, request_bytes, request_offset);
         io_uring_sqe_set_data(sqe, data.get());
+
         int r = io_uring_submit(&ring);
         if (r < 0) {
             LOG_ERROR() << "AsyncUringReader: io_uring_submit failed: " << r << " (" << strerror(-r) << ")";
@@ -307,7 +308,7 @@ bool AsyncUringReader::Read(
     bool needs_notify = false;
     {
         std::unique_lock<std::mutex> lock(Lock);
-        if (inflight++ <= 0) {
+        if (InflightCount++ <= 0) {
             needs_notify = true;
         }
     }
@@ -323,10 +324,10 @@ void AsyncUringReader::Loop() {
         // Wait until termination or completions
         {
             std::unique_lock<std::mutex> lock(Lock);
-            Condition.wait(lock, [this]{ return Terminated || inflight > 0; });
+            Condition.wait(lock, [this]{ return Terminated || InflightCount > 0; });
         }
 
-        while (!Terminated && inflight > 0) {
+        while (!Terminated && InflightCount > 0) {
             HandleNext();
         }
     }
