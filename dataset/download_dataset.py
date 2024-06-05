@@ -12,6 +12,7 @@ import git
 from tqdm import tqdm
 import time
 import multiprocessing
+import tempfile
 
 # Function to get the list of files to download
 def get_file_list():
@@ -72,29 +73,38 @@ def clone_and_move_file(file_path, temp_dir, out_dir):
     print(f"\nDownloaded {dst_file_path}: {download_speed:.2f} MB/s")
 
 # Worker function for multiprocessing
-def worker(file_path):
-    temp_dir = os.path.abspath(f"{DOWNLOAD_TEMP_DIR}/temp_{os.getpid()}")
-    out_dir = os.path.abspath(OUTPUT_DIR)
+def worker(args):
+    base_temp_dir, out_dir, file_path = args
+    temp_dir = tempfile.mkdtemp(dir=base_temp_dir)
 
-    os.makedirs(temp_dir, exist_ok=False)
     os.chdir(temp_dir)
 
     clone_and_move_file(file_path, temp_dir, out_dir)
 
+    os.chdir(base_temp_dir)
+
+    shutil.rmtree(temp_dir)
+
 if __name__ == "__main__":
-    # Ensure the output directory exists
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    if os.path.exists(os.path.abspath(DOWNLOAD_TEMP_DIR)):
-        shutil.rmtree(os.path.abspath(DOWNLOAD_TEMP_DIR))
+    temp_dir = os.path.abspath(DOWNLOAD_TEMP_DIR)
+    out_dir = os.path.abspath(OUTPUT_DIR)
+
+    # Ensure the output directories exist
+    os.makedirs(out_dir, exist_ok=True)
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    os.makedirs(temp_dir, exist_ok=False)
 
     # Get the list of files to download
     file_paths = get_file_list()
 
     print(f"\nDownloading {len(file_paths)} files...")
 
+    worker_args = [(temp_dir, out_dir, file_path) for file_path in file_paths]
+
     # Create a progress bar
     with tqdm(total=len(file_paths), desc="Downloading files") as pbar:
         # Start multiprocessing pool to download files in parallel
         with multiprocessing.Pool(NUM_WORKERS) as pool:
-            for _ in pool.imap_unordered(worker, file_paths):
+            for _ in pool.imap_unordered(worker, worker_args):
                 pbar.update(1)

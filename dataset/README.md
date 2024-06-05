@@ -7,10 +7,10 @@ The scripts convert downloaded HuggingFace datasets into our format by tokenizin
 Modify `download_dataset.py` script to edit the dataset location.  Download the dataset to a file server:
 
 ```bash
-rm -rf download_temp fineweb_download
-
 python download_dataset.py
 ```
+
+If the process is aborted, run `rm -rf download_temp` to remove the temporary directory.
 
 ## Shard and tokenize the dataset
 
