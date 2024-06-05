@@ -5,6 +5,9 @@ The scripts convert downloaded HuggingFace datasets into our format by tokenizin
 Download and tokenize the dataset:
 
 ```bash
+sudo apt install git-lfs
+git lfs install
+
 python -m dataset.download_dataset
 ```
 

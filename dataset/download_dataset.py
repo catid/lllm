@@ -1,160 +1,101 @@
-import numpy as np
-import argparse
-from pathlib import Path
-from datasets import load_dataset
+import requests
+import os
+import shutil
+import git
+import time
 import multiprocessing
-import logging
-from tqdm import tqdm
+from pathlib import Path
 
-from . import TRIE_TOKENIZER  # Adjusted the import statement
+# Configuration
+DATASET_USER = "HuggingFaceFW"
+DATASET_NAME = "fineweb-edu"
+OUTPUT_DIR = "fineweb_download"  # Shared output directory
+DOWNLOAD_TEMP_DIR = "download_temp"  # Temporary directory for downloading files
+NUM_WORKERS = 4  # Number of parallel workers
 
-# Set up logging configuration
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+# Function to get the list of files to download
+def get_file_list():
+    HTTP_URL = f"https://huggingface.co/api/datasets/{DATASET_USER}/{DATASET_NAME}"
+    response = requests.get(HTTP_URL)
+    files = []
 
-def write_worker(input, output, file_id, stride, output_folder):
-    for args in iter(input.get, None):
-        try:
-            chunked_token_ids = args[0]
+    if response.status_code == 200:
+        data = response.json()
+        for item in data["siblings"]:
+            file = item["rfilename"]
+            if file.startswith("data/"):
+                files.append(file)
+    else:
+        print(f"Error fetching data: {response.status_code}")
 
-            # Find the max length for padding
-            max_length = max(len(chunk) for chunk in chunked_token_ids)
+    return files
 
-            output_dir = Path(output_dir) / ""
-
-            fp = np.memmap(file_path, dtype='uint16', mode='w+', shape=(len(chunked_token_ids), max_length))
-
-            for i, chunk in enumerate(chunked_token_ids):
-                # Determine the amount of padding needed
-                padding_length = max_length - len(chunk)
-                # Create the padded chunk (avoiding creation of a temporary large array)
-                padded_chunk = np.array(chunk + [0] * padding_length, dtype=np.uint16)
-                # Write directly to the memory-mapped file
-                fp[i, :] = padded_chunk
-
-            del fp  # Flush changes to disk
-
-        except Exception as e:
-            logger.error(f"token_worker_task exception: {e}")
-
-        file_id += stride
-        output.put(result)
-
-def token_worker_task(write_task_queue, tokenizer, texts):
-    active_tasks = 0
-
+# Function to clone the repository and move the file
+def clone_and_move_file(file_path, temp_dir, out_dir):
     try:
-        # Tokenize texts
-        token_ids = [tokenizer.encode(text) for text in texts]
+        start_time = time.time()
 
-        # Split each text into chunks of up to 8192 tokens
-        chunked_token_ids = []
-        for tokens in token_ids:
-            chunks = [tokens[i:i+args.max_tokens] for i in range(0, len(tokens), args.max_tokens)]
-            # Drop the last chunk of a set if it has fewer than min_tokens
-            if len(chunks) > 0 and len(chunks[-1]) < args.min_tokens:
-                chunks = chunks[:-1]
-            chunked_token_ids.extend(chunks)
+        dst_file_path = os.path.join(out_dir, file_path)
+        if os.path.exists(dst_file_path):
+            print(f"File {dst_file_path} already exists. Skipping...")
+            return
+        os.makedirs(os.path.dirname(dst_file_path), exist_ok=True)
 
-        write_task_queue.put(chunked_token_ids)
-        active_tasks += 1
+        # Initialize the Git repository
+        repo = git.Repo.init(temp_dir)
 
+        # Enable sparse-checkout
+        sparse_checkout_path = os.path.join(temp_dir, '.git', 'info', 'sparse-checkout')
+        with open(sparse_checkout_path, 'w') as f:
+            f.write(file_path + '\n')
+
+        # Set the config for sparse checkout
+        repo.git.config('core.sparseCheckout', 'true')
+
+        # Add the remote repository
+        REPO_URL = f"https://huggingface.co/datasets/{DATASET_USER}/{DATASET_NAME}.git"
+        origin = repo.create_remote('origin', REPO_URL)
+
+        # Fetch and checkout the specific file
+        origin.fetch()
+        repo.git.checkout('main')
+
+        # Move the file to the output directory
+        src_file_path = os.path.join(temp_dir, file_path)
+        shutil.move(src_file_path, dst_file_path)
+
+        # Calculate and print the download speed
+        end_time = time.time()
+        file_size = os.path.getsize(dst_file_path)  # File size in bytes
+        download_time = end_time - start_time  # Time in seconds
+        download_speed = file_size / download_time / (1024 * 1024)  # Speed in MB/s
+
+        print(f"File {file_path} has been downloaded and moved to {dst_file_path}: {download_speed:.2f} MB/s")
     except Exception as e:
-        logger.error(f"token_worker_task exception: {e}")
+        print(f"Failed to process {file_path}: {e}")
+    finally:
+        # Clean up the temporary directory
+        shutil.rmtree(temp_dir)
 
-    return active_tasks
+# Worker function for multiprocessing
+def worker(file_path):
+    if os.path.exists(os.path.abspath(DOWNLOAD_TEMP_DIR)):
+        shutil.rmtree(os.path.abspath(DOWNLOAD_TEMP_DIR))
+    temp_dir = os.path.abspath(f"{DOWNLOAD_TEMP_DIR}/temp_{os.getpid()}")
+    os.makedirs(temp_dir, exist_ok=False)
+    os.chdir(temp_dir)
+    print(f"Working in {temp_dir}")
+    clone_and_move_file(file_path, temp_dir, OUTPUT_DIR)
 
-def token_worker(input, output, write_task_queue):
-    for args in iter(input.get, None):
-        result = token_worker_task(write_task_queue, *args)
-        output.put(result)
+if __name__ == "__main__":
+    # Ensure the output directory exists
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def produce_token_tasks(tokenizer, dataset, output_folder, args):
-    write_task_queue = multiprocessing.Queue()
-    write_done_queue = multiprocessing.Queue()
+    # Get the list of files to download
+    file_paths = get_file_list()
 
-    for i in range(args.num_workers):
-        stride = args.num_workers
-        multiprocessing.Process(target=write_worker, args=(write_task_queue, write_done_queue, stride, output_folder)).start()
+    print(f"Downloading {len(file_paths)} files...")
 
-    token_task_queue = multiprocessing.Queue()
-    token_done_queue = multiprocessing.Queue()
-
-    for i in range(args.num_workers):
-        multiprocessing.Process(target=token_worker, args=(token_task_queue, token_done_queue, write_task_queue)).start()
-
-    active_token_tasks = 0
-    active_write_tasks = 0
-
-    for i in tqdm(range(0, len(dataset), args.chunk_size), desc="Producing tasks"):
-        chunk = dataset[i:i+args.chunk_size]
-        texts = chunk['text']  # Assuming 'text' is the field with text data
-
-        task = (tokenizer, output_folder, texts)
-
-        token_task_queue.put(task)
-        active_token_tasks += 1
-
-        # Pause until we have at least one active worker slot
-        if active_token_tasks >= args.num_workers:
-            active_write_tasks += token_done_queue.get()
-            active_token_tasks -= 1
-
-        # Pause until we have at least one active worker slot
-        if active_write_tasks >= args.num_workers:
-            write_done_queue.get()
-            active_write_tasks -= 1
-
-    # Add a sentinel to the queue to signal the end of tasks
-    for i in range(args.num_workers):
-        token_task_queue.put(None)
-
-    # Wait for all tasks to complete
-    while active_token_tasks > 0:
-        active_write_tasks += token_done_queue.get()
-        active_token_tasks -= 1
-
-    # Add a sentinel to the queue to signal the end of tasks
-    # Do this after token tasks are done to avoid race conditions
-    for i in range(args.num_workers):
-        write_task_queue.put(None)
-
-    # Wait for all tasks to complete
-    while active_write_tasks > 0:
-        write_done_queue.get()
-        active_write_tasks -= 1
-
-def main(args):
-    # Determine the output folder
-    output_folder = args.dest if args.dest else Path.home() / 'lllm_dataset'
-    output_folder.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
-
-    # Initialize the tokenizer with the vocabulary file
-    tokenizer = TRIE_TOKENIZER(args.vocab_file)
-
-    # Load the dataset
-    dataset = load_dataset(args.dataset_repo, split=args.split, name=args.dataset_name)
-
-    # Run the processing function
-    produce_token_tasks(tokenizer, dataset, output_folder, args)
-    logger.info("All data has been tokenized and saved.")
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Tokenize and save dataset.")
-    parser.add_argument('--vocab_file', type=str, default="rwkv_vocab_v20230424.txt", help="Path to the vocabulary file")
-    parser.add_argument('--dataset_repo', type=str, default="allenai/dolma", help="Name of the dataset repo to load")
-    parser.add_argument('--dataset_name', type=str, default="v1_6-sample", help="Which version of dataset to load")
-    parser.add_argument('--split', type=str, default="train", help="Dataset split to use")
-    parser.add_argument('--chunk_size', type=int, default=1000, help="Number of texts to process in each chunk")
-    parser.add_argument('--context', type=int, default=8192, help="Max tokens per chunk")
-    parser.add_argument('--min_tokens', type=int, default=1024, help="Min tokens and end of chunk split")
-    parser.add_argument('--max_tokens', type=int, default=131072, help="Max tokens and end of chunk split")
-    parser.add_argument('--dest', type=str, default='', help="Destination folder to save the tokenized data. Default is '~/dataset'.")
-    parser.add_argument('--num_workers', type=int, default=8, help="Number of workers")
-    args = parser.parse_args()
-
-    main(args)
+    # Start multiprocessing pool to download files in parallel
+    with multiprocessing.Pool(NUM_WORKERS) as pool:
+        pool.map(worker, file_paths)
