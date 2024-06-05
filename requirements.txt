@@ -3,6 +3,7 @@ numpy
 einops
 pytest
 flash-attn
+tqdm
 
 # Meta products
 torch
