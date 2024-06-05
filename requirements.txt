@@ -5,6 +5,10 @@ pytest
 flash-attn
 tqdm
 
+# Dataset dependencies
+git-python
+paramiko
+
 # Meta products
 torch
 schedulefree

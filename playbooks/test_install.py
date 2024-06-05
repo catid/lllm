@@ -4,4 +4,4 @@ import schedulefree
 import wandb
 import deepspeed
 
-print("LLLM installation test passed.")
+print("Dependencies installed")

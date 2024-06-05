@@ -1,7 +1,8 @@
 # Modify configuration:
-DATASET_USER = "HuggingFaceFW"
-DATASET_NAME = "fineweb-edu"
-OUTPUT_DIR = "/mnt/Media/datasets/fineweb-edu"
+DATASET_USER = "HuggingFaceFW" # EDIT THIS
+DATASET_NAME = "fineweb-edu" # EDIT THIS
+OUTPUT_DIR = "/mnt/Media/datasets/fineweb-edu" # EDIT THIS
+
 DOWNLOAD_TEMP_DIR = "download_temp"
 NUM_WORKERS = 4
 
