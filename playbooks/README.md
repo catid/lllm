@@ -22,8 +22,14 @@ This key will be used to log into the machines in the following steps.
 
 ## Ansible Setup
 
+Add your user password to `sudo.yml` and run the following commands.
+
 ```bash
 cd playbooks
+
+echo "ansible_become_password: PASSWORD" > sudo.yml
+
+sudo apt install ansible
 
 # Set up Conda
 ansible-playbook install_conda.yml
