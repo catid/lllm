@@ -25,9 +25,10 @@
 
     - name: Clone lllm repository
       ansible.builtin.git:
-        repo: git@github.com:catid/lllm
+        repo: https://github.com/catid/lllm
         dest: "{{ lookup('env', 'HOME') }}/lllm"
         update: "{{ lllm_repository.stat.exists }}"
+        update: yes
 
     - name: Check if lllm conda environment exists
       ansible.builtin.shell:
@@ -45,4 +46,4 @@
     - name: Install pip requirements.txt
       shell: |
         cd "{{ lookup('env', 'HOME') }}/lllm"
-        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/pip" install -r requirements.txt
+        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/pip" install -U -r requirements.txt

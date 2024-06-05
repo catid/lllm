@@ -1,0 +1,15 @@
+---
+- name: Install Conda for the current user if not installed
+  hosts: all
+  become: no
+  gather_facts: no
+  tasks:
+    - name: Check training data
+      shell: |
+        cd "{{ lookup('env', 'HOME') }}/lllm"
+        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/python" playbooks/test_install.py --fast --clean
+      register: shell_output
+
+    - name: Display shell output
+      debug:
+        msg: "The shell output is: {{ shell_output.stdout }}"

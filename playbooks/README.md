@@ -30,4 +30,17 @@ ansible-playbook install_conda.yml
 
 # Set up the LLLM repo and dependencies
 ansible-playbook setup_lllm.yml
+
+# Check that everything is working
+ansible-playbook test_install.yml
+```
+
+## Update repo
+
+To update the lllm repository, just run the setup script again.
+
+```bash
+cd playbooks
+
+ansible-playbook setup_lllm.yml
 ```
