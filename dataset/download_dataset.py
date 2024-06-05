@@ -79,17 +79,16 @@ def clone_and_move_file(file_path, temp_dir, out_dir):
 
 # Worker function for multiprocessing
 def worker(file_path):
-    if os.path.exists(os.path.abspath(DOWNLOAD_TEMP_DIR)):
-        shutil.rmtree(os.path.abspath(DOWNLOAD_TEMP_DIR))
     temp_dir = os.path.abspath(f"{DOWNLOAD_TEMP_DIR}/temp_{os.getpid()}")
     os.makedirs(temp_dir, exist_ok=False)
     os.chdir(temp_dir)
-    print(f"Working in {temp_dir}")
     clone_and_move_file(file_path, temp_dir, OUTPUT_DIR)
 
 if __name__ == "__main__":
     # Ensure the output directory exists
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    if os.path.exists(os.path.abspath(DOWNLOAD_TEMP_DIR)):
+        shutil.rmtree(os.path.abspath(DOWNLOAD_TEMP_DIR))
 
     # Get the list of files to download
     file_paths = get_file_list()
