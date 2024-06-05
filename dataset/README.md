@@ -2,17 +2,34 @@
 
 The scripts convert downloaded HuggingFace datasets into our format by tokenizing the text into context-aligned batches and compressing each one into 4 GB files with an index to look up the pieces.  This also supports a hash to check the integrity of the data.  Operations are performed in parallel with inner loops in C++ to maximize throughput.
 
-Download and tokenize the dataset:
+## Download the dataset to your file server
+
+Modify `download_dataset.py` script to edit the dataset location.  Download the dataset to a file server:
 
 ```bash
 rm -rf download_temp fineweb_download
 
 python download_dataset.py
-
-python -m dataset.download_dataset
 ```
 
-Modify the copy_hosts.txt file to point to the hosts you are using for training.  Modify the top of the `copy_dataset.sh` script to change `DIR_PATH` and `SOURCE_HOST`.  All hosts for training must have a copy of the dataset.  Then copy the dataset to each host:
+## Shard and tokenize the dataset
+
+This step will access your file server to create local shards of the dataset on each training node.  Each node will have a fraction of the dataset, stored in our `cpp_dataloader` format.
+
+Modify the `hosts.txt` file to point to the hosts you are using for training.
+
+```bash
+
+(1) Check out this code on all the hosts
+(2) Run `python shard_dataset.py` on each host with the appropriate arguments
+
+python shard_dataset.py
+
+```
+
+## 
+
+  Modify the top of the `copy_dataset.sh` script to change `DIR_PATH` and `SOURCE_HOST`.  All hosts for training must have a copy of the dataset.  Then copy the dataset to each host: 
 
 ```bash
 sudo apt install parallel rsync

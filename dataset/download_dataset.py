@@ -69,7 +69,7 @@ def clone_and_move_file(file_path, temp_dir, out_dir):
     download_time = end_time - start_time  # Time in seconds
     download_speed = file_size / download_time / (1024 * 1024)  # Speed in MB/s
 
-    print(f"Downloaded {dst_file_path}: {download_speed:.2f} MB/s")
+    print(f"\nDownloaded {dst_file_path}: {download_speed:.2f} MB/s")
 
 # Worker function for multiprocessing
 def worker(file_path):
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     # Get the list of files to download
     file_paths = get_file_list()
 
-    print(f"Downloading {len(file_paths)} files...")
+    print(f"\nDownloading {len(file_paths)} files...")
 
     # Create a progress bar
     with tqdm(total=len(file_paths), desc="Downloading files") as pbar:
