@@ -18,6 +18,11 @@ python download_dataset.py
 If the process is aborted, run `rm -rf download_temp` to remove the temporary directory.
 
 
+## Install the C++ dataloader package
+
+Follow the instructions in the `dataset/cpp_dataloader/` directory.
+
+
 ## Shard and tokenize the dataset
 
 This step will access your file server to create local shards of the dataset on each training node.  Each node will have a fraction of the dataset.

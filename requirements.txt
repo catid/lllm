@@ -6,6 +6,7 @@ flash-attn
 tqdm
 
 # Dataset dependencies
+build
 git-python
 paramiko
 

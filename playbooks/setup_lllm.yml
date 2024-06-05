@@ -5,10 +5,17 @@
   vars_files:
     - sudo.yml
   tasks:
-    - name: Install pdsh
+    - name: Install apt package build-essential
       become: yes
       ansible.builtin.apt:
-        name: pdsh
+        name: build-essential
+        state: present
+        update_cache: yes
+
+    - name: Install apt package cmake
+      become: yes
+      ansible.builtin.apt:
+        name: cmake
         state: present
 
     - name: Check if lllm repository exists
@@ -47,3 +54,9 @@
       shell: |
         cd "{{ lookup('env', 'HOME') }}/lllm"
         "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/pip" install -U -r requirements.txt
+
+    - name: Install C++ dataloader
+      shell: |
+        cd "{{ lookup('env', 'HOME') }}/lllm/dataset/cpp_dataloader"
+        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/python" -m build
+        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/pip" install --force-reinstall "{{ lookup('env', 'HOME') }}/lllm/dataset/cpp_dataloader/dist/*.whl"
