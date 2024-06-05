@@ -7,6 +7,8 @@ The scripts convert downloaded HuggingFace datasets into our format by tokenizin
 Modify `download_dataset.py` script to edit the dataset location.  Download the dataset to a file server:
 
 ```bash
+cd dataset
+
 python download_dataset.py
 ```
 
@@ -19,6 +21,9 @@ This step will access your file server to create local shards of the dataset on 
 Modify the `hosts.txt` file to point to the hosts you are using for training.
 
 ```bash
+pip install paramiko
+
+python install_repo.py
 
 (1) Check out this code on all the hosts
 (2) Run `python shard_dataset.py` on each host with the appropriate arguments

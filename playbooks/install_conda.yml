@@ -1,0 +1,37 @@
+---
+- name: Install Conda for the current user if not installed
+  hosts: all
+  become: no
+  tasks:
+    - name: Check if Conda is installed
+      ansible.builtin.stat:
+        path: "{{ lookup('env', 'HOME') }}/mambaforge/bin/conda"
+      register: conda_installed
+
+    - name: Download Miniconda installer
+      ansible.builtin.get_url:
+        url: https://github.com/conda-forge/miniforge/releases/latest/download/Mambaforge-pypy3-Linux-x86_64.sh
+        dest: "{{ lookup('env', 'HOME') }}/mamabaforge_installer.sh"
+        mode: '0755'
+      when: not conda_installed.stat.exists
+
+    - name: Install Mambaforge
+      ansible.builtin.shell:
+        cmd: "{{ lookup('env', 'HOME') }}/mamabaforge_installer.sh -b -p {{ lookup('env', 'HOME') }}/mambaforge"
+      args:
+        creates: "{{ lookup('env', 'HOME') }}/mambaforge"
+      when: not conda_installed.stat.exists
+
+    - name: Remove installer
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'HOME') }}/mamabaforge_installer.sh"
+        state: absent
+      when: not conda_installed.stat.exists
+
+    - name: Initialize conda for a user
+      shell: /bin/bash
+      args:
+        executable: /bin/bash
+        stdin: |
+          source ~/mambaforge/etc/profile.d/conda.sh
+          conda init bash

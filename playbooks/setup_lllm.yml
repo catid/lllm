@@ -1,0 +1,48 @@
+---
+- name: Set up lllm environment
+  hosts: all
+  become: no
+  vars_files:
+    - sudo.yml
+  tasks:
+    - name: Install pdsh
+      become: yes
+      ansible.builtin.apt:
+        name: pdsh
+        state: present
+
+    - name: Check if lllm repository exists
+      ansible.builtin.stat:
+        path: "{{ lookup('env', 'HOME') }}/lllm"
+      register: lllm_repository
+
+    - name: Add github.com to known_hosts
+      ansible.builtin.known_hosts:
+        name: github.com
+        key: "{{ lookup('pipe', 'ssh-keyscan github.com') }}"
+        state: present
+        path: "{{ lookup('env', 'HOME') }}/.ssh/known_hosts"
+
+    - name: Clone lllm repository
+      ansible.builtin.git:
+        repo: git@github.com:catid/lllm
+        dest: "{{ lookup('env', 'HOME') }}/lllm"
+        update: "{{ lllm_repository.stat.exists }}"
+
+    - name: Check if lllm conda environment exists
+      ansible.builtin.shell:
+        cmd: "{{ lookup('env', 'HOME') }}/mambaforge/bin/conda env list | grep lllm"
+      register: conda_env_output
+      ignore_errors: true
+
+    - name: Create lllm conda environment and install dependencies
+      block:
+        - name: Create conda environment
+          ansible.builtin.shell:
+            cmd: "{{ lookup('env', 'HOME') }}/mambaforge/bin/conda create -y --name lllm python=3.10"
+      when: conda_env_output.rc != 0
+
+    - name: Install pip requirements.txt
+      shell: |
+        cd "{{ lookup('env', 'HOME') }}/lllm"
+        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/pip" install -r requirements.txt
