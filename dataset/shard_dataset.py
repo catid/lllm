@@ -36,14 +36,23 @@ def read_parquet_file(file_path, args, queue):
         end_index = min(start_index + shard_size, pfile.num_row_groups)
 
         indices = list(range(start_index, end_index))
-        subsets = split_array(indices, max_size=64)
+        subsets = split_array(indices, max_size=4)
+
+        print(f"Processing rows {pfile.num_row_groups} subsets from {file_path}")
+
+        count = 0
 
         for group_subset in subsets:
-            group = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
+            groups = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
 
-            for row in group:
-                text = str(row[0])
-                queue.put(text)
+            for group in groups:
+                rows = group.to_pylist()
+
+                for row in rows:
+                    count += 1
+                    queue.put(row)
+
+        print(f"Processed {count} rows from {file_path}")
     except Exception as e:
         print(f"Error processing {file_path}: {e}")
 
@@ -52,7 +61,7 @@ def read_parquet_files(parquet_files, args, queue):
     start_time = time.time()
     processed_files = 0
 
-    arrays = split_array(parquet_files, max_size=8)
+    arrays = split_array(parquet_files, max_size=3)
 
     for files in arrays:
         processes = []
@@ -77,6 +86,18 @@ def print_progress_bar(args, iteration, total, start_time, bar_length=40):
     bar = '#' * bar_filled + '-' * (bar_length - bar_filled)
     print(f"[Ranks {args.rank_start}-{args.rank_start + args.rank_count - 1}] {percent}% [{bar}] {elapsed_time_str} / {eta_str}")
 
+def tokenizer_worker(queue, output_queue):
+    tokenizer = tiktoken.encoding_for_model("gpt-4o")
+
+    while True:
+        text = queue.get()
+        if text is None:
+            output_queue.put(None)
+            break
+
+        tokenized_text = tokenizer.encode(text)
+        output_queue.put(tokenized_text)
+
 def main():
     parser = argparse.ArgumentParser(description="Read and process shards of a Parquet file.")
     parser.add_argument('--dataset_dir', type=str, default="/mnt/Media/datasets/fineweb-edu", help="Path to the Parquet files.")
@@ -89,7 +110,6 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    tokenizer = tiktoken.encoding_for_model("gpt-4o")
     data_prep = DataPreparation(args.output_dir)
 
     parquet_files = get_parquet_files(args.dataset_dir)
@@ -97,15 +117,30 @@ def main():
     process = Process(target=read_parquet_files, args=(parquet_files, args, queue))
     process.start()
 
+    out_queue = Queue(maxsize=128)
+
+    # Create a pool of tokenizer worker processes
+    pool = []
+    for _ in range(16):
+        p = Process(target=tokenizer_worker, args=(queue, out_queue))
+        p.start()
+        pool.append(p)
+
     while True:
-        text = queue.get()
-        if text is None:  # Check for the sentinel value
+        tokenized_text = out_queue.get()
+        if tokenized_text is None:  # Check for the sentinel value
             break
 
-        tokenized_text = tokenizer.encode(text)
         data_prep.write_tokenized_text(tokenized_text)
 
+    # Ensure all worker processes have finished
+    for p in pool:
+        queue.put(None)
+    for p in pool:
+        p.join()
+
     process.join()
+
     data_prep.destroy()
     print("\nProcessing complete.")
 
