@@ -3,7 +3,7 @@
 #include "tools.hpp"
 
 bool test_data_verify() {
-    if (!data_verify("test_data")) {
+    if (!VerifyDataset("test_data")) {
         LOG_ERROR() << "test_data_verify test failed";
         return false;
     }
