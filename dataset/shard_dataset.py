@@ -8,7 +8,7 @@ import tiktoken
 from multiprocessing import Process, Pool
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
-from package import DataLoader, DataPreparation, DataVerifier
+from cpp_dataloader import DataLoader, DataPreparation, DataVerifier
 import sys
 
 def get_parquet_files(directory):
