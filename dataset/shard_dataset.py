@@ -102,8 +102,8 @@ def main():
         if text is None:  # Check for the sentinel value
             break
 
-        #tokenized_text = tokenizer.encode(text)
-        #data_prep.write_tokenized_text(tokenized_text)
+        tokenized_text = tokenizer.encode(text)
+        data_prep.write_tokenized_text(tokenized_text)
 
     process.join()
     data_prep.destroy()
