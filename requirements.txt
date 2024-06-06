@@ -2,8 +2,6 @@
 numpy
 einops
 pytest
-packaging
-flash-attn
 tqdm
 
 # Dataset dependencies
