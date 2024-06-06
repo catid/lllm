@@ -30,10 +30,7 @@ def split_array(arr, max_size=4):
 def read_parquet_file(file_paths, args, queue):
     with tempfile.TemporaryDirectory() as temp_dir:
         for file_path in file_paths:
-            temp_file_path = os.path.join(temp_dir, os.path.basename(file_path))
-            shutil.copy(file_path, temp_file_path)
-
-            pfile = pq.ParquetFile(temp_file_path)
+            pfile = pq.ParquetFile(file_path)
 
             shard_size = (pfile.num_row_groups + args.world_size - 1) // args.world_size
             start_index = args.rank_start * shard_size
@@ -41,6 +38,8 @@ def read_parquet_file(file_paths, args, queue):
 
             indices = list(range(start_index, end_index))
             subsets = split_array(indices, max_size=32)
+
+            print(f"{file_path}: Processing {len(subsets)} subsets of {len(indices)} rows")
 
             for group_subset in subsets:
                 group = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
