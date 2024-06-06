@@ -39,11 +39,12 @@ conda activate lllm
 python make_shard_script.py --dataset-dir /mnt/Media/datasets/fineweb-edu --output-dir ~/dataset_shard
 ```
 
-Run the dataset sharding job across the cluster:
+This produces `run_all_hosts.sh`.  Run the dataset sharding job across the cluster:
 
 ```bash
 sudo apt install pdsh parallel
 
-chmod +x run_all_hosts.sh
 ./run_all_hosts.sh
 ```
+
+If you hit CTRL+C it will abort the remote jobs.

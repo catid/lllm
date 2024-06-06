@@ -8,6 +8,7 @@ import argparse
 import tiktoken
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
+from threading import Semaphore
 
 def get_parquet_files(directory):
     parquet_files = []
@@ -20,9 +21,10 @@ def read_parquet(file_path):
     df = pd.read_parquet(file_path)
     return df
 
-def tokenize_and_write(data_prep, tokenizer, text):
+def tokenize_and_write(data_prep, tokenizer, text, semaphore):
     tokenized_text = tokenizer.encode(text)
     data_prep.write_tokenized_text(tokenized_text)
+    semaphore.release()
 
 def process_shard(data_prep, df, args, tokenizer):
     # Split the DataFrame into shards
@@ -34,11 +36,13 @@ def process_shard(data_prep, df, args, tokenizer):
 
     shard = df.iloc[start_index:end_index]
 
+    semaphore = Semaphore(16)  # Limit to 16 concurrent tasks
     with ThreadPoolExecutor() as executor:
         futures = []
         for line in shard.itertuples(index=False, name=None):
+            semaphore.acquire()
             text = " ".join(map(str, line))  # Convert the tuple to a single string
-            futures.append(executor.submit(tokenize_and_write, data_prep, tokenizer, text))
+            futures.append(executor.submit(tokenize_and_write, data_prep, tokenizer, text, semaphore))
 
         for future in as_completed(futures):
             future.result()  # Raise exceptions if any
