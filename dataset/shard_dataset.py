@@ -1,12 +1,16 @@
 import os
 import glob
 import argparse
-import pandas as pd
+import pyarrow.dataset as ds
+import pyarrow.parquet as pq
+import pyarrow as pa
 from multiprocessing import Process, Queue
 import sys
 import time
 import tiktoken
 from cpp_dataloader import DataPreparation
+import shutil
+import tempfile
 
 def get_parquet_files(directory):
     parquet_files = []
@@ -14,55 +18,51 @@ def get_parquet_files(directory):
         parquet_files.extend(glob.glob(os.path.join(root, '*.parquet')))
     return parquet_files
 
-def read_parquet_file(file_path, args, queue):
-    df = pd.read_parquet(file_path)
+def split_array(arr, max_size=4):
+    result = []
+    i = 0
+    while i < len(arr):
+        sub_arr = arr[i:min(i + max_size, len(arr))]
+        result.append(sub_arr)
+        i += len(sub_arr)
+    return result
 
-    shard_size = (len(df) + args.world_size - 1) // args.world_size
-    start_index = args.rank_start * shard_size
-    end_index = min(start_index + shard_size, len(df))
+def read_parquet_file(file_paths, args, queue):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        for file_path in file_paths:
+            temp_file_path = os.path.join(temp_dir, os.path.basename(file_path))
+            shutil.copy(file_path, temp_file_path)
 
-    shard = df.iloc[start_index:end_index]
+            pfile = pq.ParquetFile(temp_file_path)
 
-    for line in shard.itertuples(index=False, name=None):
-        text = line[0]
+            shard_size = (pfile.num_row_groups + args.world_size - 1) // args.world_size
+            start_index = args.rank_start * shard_size
+            end_index = min(start_index + shard_size, pfile.num_row_groups)
 
-        queue.put(text)
+            indices = list(range(start_index, end_index))
+            subsets = split_array(indices, max_size=32)
+
+            for group_subset in subsets:
+                group = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
+
+                for row in group:
+                    text = str(row[0])
+                    queue.put(text)
 
 def read_parquet_files(parquet_files, args, queue):
     total_files = len(parquet_files)
     start_time = time.time()
     processed_files = 0
 
-    # Iterate in pairs
-    for i in range(0, len(parquet_files), 2):
-        if i + 1 < len(parquet_files):
-            # Process a pair of files
-            file_path1 = parquet_files[i]
-            file_path2 = parquet_files[i + 1]
+    arrays = split_array(parquet_files, max_size=1)
 
-            process1 = Process(target=read_parquet_file, args=(file_path1, args, queue))
-            process1.start()
-            process2 = Process(target=read_parquet_file, args=(file_path2, args, queue))
-            process2.start()
+    for files in arrays:
+        process = Process(target=read_parquet_file, args=(files, args, queue))
+        process.start()
+        process.join()
 
-            process1.join()
-            processed_files += 1
-            print_progress_bar(args, processed_files, total_files, start_time)
-
-            process2.join()
-            processed_files += 1
-            print_progress_bar(args, processed_files, total_files, start_time)
-
-        else:
-            # Process the last file if the count is odd
-            file_path = parquet_files[i]
-
-            process = Process(target=read_parquet_file, args=(file_path, args, queue))
-            process.start()
-            process.join()
-
-            processed_files += 1
-            print_progress_bar(args, processed_files, total_files, start_time)
+        processed_files += len(files)
+        print_progress_bar(args, processed_files, total_files, start_time)
 
     queue.put(None)  # Sentinel to indicate completion
 

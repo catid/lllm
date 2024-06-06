@@ -7,8 +7,7 @@ tqdm
 # Dataset dependencies
 build
 git-python
-paramiko
-pandas
+pyarrow
 
 # Meta products
 torch
