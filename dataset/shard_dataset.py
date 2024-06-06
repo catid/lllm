@@ -28,25 +28,24 @@ def split_array(arr, max_size=4):
     return result
 
 def read_parquet_file(file_paths, args, queue):
-    with tempfile.TemporaryDirectory() as temp_dir:
-        for file_path in file_paths:
-            pfile = pq.ParquetFile(file_path)
+    for file_path in file_paths:
+        pfile = pq.ParquetFile(file_path)
 
-            shard_size = (pfile.num_row_groups + args.world_size - 1) // args.world_size
-            start_index = args.rank_start * shard_size
-            end_index = min(start_index + shard_size, pfile.num_row_groups)
+        shard_size = (pfile.num_row_groups + args.world_size - 1) // args.world_size
+        start_index = args.rank_start * shard_size
+        end_index = min(start_index + shard_size, pfile.num_row_groups)
 
-            indices = list(range(start_index, end_index))
-            subsets = split_array(indices, max_size=32)
+        indices = list(range(start_index, end_index))
+        subsets = split_array(indices, max_size=32)
 
-            print(f"{file_path}: Processing {len(subsets)} subsets of {len(indices)} rows")
+        print(f"{file_path}: Processing {len(subsets)} subsets of {len(indices)} rows of {pfile.num_row_groups} row groups")
 
-            for group_subset in subsets:
-                group = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
+        for group_subset in subsets:
+            group = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
 
-                for row in group:
-                    text = str(row[0])
-                    queue.put(text)
+            for row in group:
+                text = str(row[0])
+                queue.put(text)
 
 def read_parquet_files(parquet_files, args, queue):
     total_files = len(parquet_files)
