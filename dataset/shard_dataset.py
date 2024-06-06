@@ -5,8 +5,10 @@ import os
 import glob
 import argparse
 import tiktoken
-from multiprocessing import Process, Queue, Pool, cpu_count, Semaphore
-from cpp_dataloader import DataLoader, DataPreparation, DataVerifier
+from multiprocessing import Process, Pool
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
+from package import DataLoader, DataPreparation, DataVerifier
 import sys
 
 def get_parquet_files(directory):
@@ -19,15 +21,7 @@ def read_parquet(file_path):
     df = pd.read_parquet(file_path)
     return df
 
-def tokenize_and_write(data_prep, tokenizer, text, semaphore, result_queue):
-    try:
-        #tokenized_text = tokenizer.encode(text)
-        #data_prep.write_tokenized_text(tokenized_text)
-        result_queue.put(True)  # Signal that the task is complete
-    finally:
-        semaphore.release()
-
-def process_shard(data_prep, df, args, tokenizer, result_queue):
+def process_shard(data_prep, df, args, tokenizer):
     shard_size = (len(df) + args.world_size - 1) // args.world_size
     start_index = args.rank_start * shard_size
     end_index = min(start_index + shard_size, len(df))
@@ -36,16 +30,18 @@ def process_shard(data_prep, df, args, tokenizer, result_queue):
 
     shard = df.iloc[start_index:end_index]
 
-    semaphore = Semaphore(16)
-    with Pool(processes=cpu_count()) as pool:
-        results = []
-        for line in shard.itertuples(index=False, name=None):
-            semaphore.acquire()
-            text = " ".join(map(str, line))
-            results.append(pool.apply_async(tokenize_and_write, (data_prep, tokenizer, text, semaphore, result_queue)))
+    total = 0
 
-        for result in results:
-            result.get()
+    for line in shard.itertuples(index=False, name=None):
+        text = line[0]
+
+        total += 1
+        print(f"Processing {len(text)}...{total}")
+
+        tokenized_text = tokenizer.encode(text)
+        data_prep.write_tokenized_text(tokenized_text)
+
+        print(f"Processed {len(text)}.")
 
 def print_progress_bar(args, iteration, total, start_time, bar_length=40):
     percent = f"{100 * (iteration / float(total)):.1f}"
@@ -84,8 +80,7 @@ def main():
     for i, file_path in enumerate(parquet_files):
         df = read_parquet(file_path)
 
-        result_queue = Queue()
-        p = Process(target=process_shard, args=(data_prep, df, args, tokenizer, result_queue))
+        p = Process(target=process_shard, args=(data_prep, df, args, tokenizer))
         p.start()
         p.join()
 

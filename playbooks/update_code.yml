@@ -1,0 +1,11 @@
+---
+- name: Update repository
+  hosts: all
+  become: no
+  tasks:
+    - name: Clone lllm repository
+      ansible.builtin.git:
+        repo: https://github.com/catid/lllm
+        dest: "{{ lookup('env', 'HOME') }}/lllm"
+        update: "{{ lllm_repository.stat.exists }}"
+        update: yes

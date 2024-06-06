@@ -1,4 +1,4 @@
-from setuptools import setup, Extension
+from setuptools import setup, Extension, find_namespace_packages
 from setuptools.command.build_ext import build_ext
 import os
 import subprocess
@@ -15,14 +15,8 @@ class CMakeBuild(build_ext):
             self.build_extension(ext)
 
     def build_extension(self, ext):
-        extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
-        cmake_args = [
-            f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
-            #f"-DPYTHON_EXECUTABLE={sys.executable}"
-        ]
-
-        cfg = "Debug" if self.debug else "Release"
-        build_args = ["--config", cfg]
+        cmake_args = []
+        build_args = ["--config", "Release"]
 
         num_threads = multiprocessing.cpu_count() - 1
         if num_threads > 1:
@@ -35,10 +29,14 @@ class CMakeBuild(build_ext):
 setup(
     name="cpp_dataloader",
     version="0.1.0",
+    python_requires='>=3',
     ext_modules=[CMakeExtension("cpp_dataloader")],
     cmdclass={"build_ext": CMakeBuild},
     package_data={
-        'cpp_dataloader': ['cpp_dataloader.so', 'cpp_dataloader_wrapper.py'],
+        'cpp_dataloader': ['cpp_dataloader_library.so'],
     },
-    include_package_data=True
+    include_package_data=True,
+    package_dir={'': 'python_src'},
+    packages=find_namespace_packages(where='python_src'),
+    install_requires=["numpy"]
 )

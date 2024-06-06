@@ -7,7 +7,7 @@ import site
 site_packages_paths = site.getsitepackages()
 
 # Assuming the .so file is in the first site-packages path found
-so_file_name = "cpp_dataloader.so"
+so_file_name = "cpp_dataloader_library.so"
 lib_path = None
 for path in site_packages_paths:
     potential_path = os.path.join(path, so_file_name)
