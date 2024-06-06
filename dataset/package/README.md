@@ -39,7 +39,7 @@ make -j
 ./test_tools
 ./test_worker_pool
 ./test_mapped_file
-#./test_uring_file
+./test_uring_file
 
 ./test_data_prep
 ./test_data_loader

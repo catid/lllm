@@ -1,15 +1,12 @@
-import random
-import time
-import pandas as pd
 import os
 import glob
 import argparse
-import tiktoken
-from multiprocessing import Process, Pool
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import partial
-from cpp_dataloader import DataLoader, DataPreparation, DataVerifier
+import pandas as pd
+from multiprocessing import Process, Queue
 import sys
+import time
+import tiktoken
+from cpp_dataloader import DataPreparation
 
 def get_parquet_files(directory):
     parquet_files = []
@@ -17,31 +14,57 @@ def get_parquet_files(directory):
         parquet_files.extend(glob.glob(os.path.join(root, '*.parquet')))
     return parquet_files
 
-def read_parquet(file_path):
+def read_parquet_file(file_path, args, queue):
     df = pd.read_parquet(file_path)
-    return df
 
-def process_shard(data_prep, df, args, tokenizer):
     shard_size = (len(df) + args.world_size - 1) // args.world_size
     start_index = args.rank_start * shard_size
     end_index = min(start_index + shard_size, len(df))
 
-    print(f"Processing {start_index} to {end_index} of {len(df)} pieces...")
-
     shard = df.iloc[start_index:end_index]
-
-    total = 0
 
     for line in shard.itertuples(index=False, name=None):
         text = line[0]
 
-        total += 1
-        print(f"Processing {len(text)}...{total}")
+        queue.put(text)
 
-        tokenized_text = tokenizer.encode(text)
-        data_prep.write_tokenized_text(tokenized_text)
+def read_parquet_files(parquet_files, args, queue):
+    total_files = len(parquet_files)
+    start_time = time.time()
+    processed_files = 0
 
-        print(f"Processed {len(text)}.")
+    # Iterate in pairs
+    for i in range(0, len(parquet_files), 2):
+        if i + 1 < len(parquet_files):
+            # Process a pair of files
+            file_path1 = parquet_files[i]
+            file_path2 = parquet_files[i + 1]
+
+            process1 = Process(target=read_parquet_file, args=(file_path1, args, queue))
+            process1.start()
+            process2 = Process(target=read_parquet_file, args=(file_path2, args, queue))
+            process2.start()
+
+            process1.join()
+            processed_files += 1
+            print_progress_bar(args, processed_files, total_files, start_time)
+
+            process2.join()
+            processed_files += 1
+            print_progress_bar(args, processed_files, total_files, start_time)
+
+        else:
+            # Process the last file if the count is odd
+            file_path = parquet_files[i]
+
+            process = Process(target=read_parquet_file, args=(file_path, args, queue))
+            process.start()
+            process.join()
+
+            processed_files += 1
+            print_progress_bar(args, processed_files, total_files, start_time)
+
+    queue.put(None)  # Sentinel to indicate completion
 
 def print_progress_bar(args, iteration, total, start_time, bar_length=40):
     percent = f"{100 * (iteration / float(total)):.1f}"
@@ -66,26 +89,23 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    print(f"Processing shards {args.rank_start} to {args.rank_start + args.rank_count - 1} of {args.world_size}.")
-
-    tokenizer = tiktoken.encoding_for_model("gpt-4")
-
-    parquet_files = get_parquet_files(args.dataset_dir)
-
+    tokenizer = tiktoken.encoding_for_model("gpt-4o")
     data_prep = DataPreparation(args.output_dir)
 
-    total_files = len(parquet_files)
-    start_time = time.time()
+    parquet_files = get_parquet_files(args.dataset_dir)
+    queue = Queue(maxsize=128)
+    process = Process(target=read_parquet_files, args=(parquet_files, args, queue))
+    process.start()
 
-    for i, file_path in enumerate(parquet_files):
-        df = read_parquet(file_path)
+    while True:
+        text = queue.get()
+        if text is None:  # Check for the sentinel value
+            break
 
-        p = Process(target=process_shard, args=(data_prep, df, args, tokenizer))
-        p.start()
-        p.join()
+        tokenized_text = tokenizer.encode(text)
+        data_prep.write_tokenized_text(tokenized_text)
 
-        print_progress_bar(args, i + 1, total_files, start_time)
-
+    process.join()
     data_prep.destroy()
     print("\nProcessing complete.")
 

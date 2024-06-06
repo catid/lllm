@@ -23,9 +23,10 @@ if __name__ == "__main__":
         prep = DataPreparation(data_path)
         
         for _ in range(4000):
-            num_tokens = random.randint(1, 20000)
-            tokens = [random.randint(0, 128000) for _ in range(num_tokens)]
-            prep.write_tokenized_text(tokens)
+        #    num_tokens = random.randint(1, 20000)
+        #    tokens = [random.randint(0, 128000) for _ in range(num_tokens)]
+        #    prep.write_tokenized_text(tokens)
+            prep.write_tokenized_text([10, 20, 30])
         
         prep.destroy()
         
@@ -33,6 +34,8 @@ if __name__ == "__main__":
         print(f"DataPreparation time: {end_time - start_time:.2f} seconds")
     except RuntimeError as e:
         print(e)
+
+    exit()
 
     print("Example usage of DataVerifier")
     try:
