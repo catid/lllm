@@ -6,7 +6,7 @@ import os
 import glob
 import argparse
 import tiktoken
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, Pool, cpu_count
 import sys
 from multiprocessing import Semaphore
 
