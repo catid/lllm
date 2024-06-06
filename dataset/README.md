@@ -20,7 +20,7 @@ If the process is aborted, run `rm -rf download_temp` to remove the temporary di
 
 ## Install the C++ dataloader package
 
-Follow the instructions in the `dataset/cpp_dataloader/` directory.
+The ansible scripts from `playbook/` have already installed the package.  If you need to install it manually, follow the instructions in the `dataset/package/` directory.
 
 
 ## Shard and tokenize the dataset
