@@ -17,6 +17,13 @@ def generate_master_script(hosts, world_size, args):
     script_content = "#!/bin/bash\n"
     script_content += "# Master script to execute shard_dataset.py on multiple hosts using parallel and pdsh\n\n"
 
+    # Set trap to call the kill_remote_jobs function when SIGINT (CTRL+C) is received
+    script_content += "\n# Set trap to call the kill_remote_jobs function when SIGINT (CTRL+C) is received\n"
+    script_content += "kill_remote_jobs() {\n"
+    script_content += f"    pdsh -R ssh -w {','.join([f'{host}' for host, _ in hosts])} 'killall python'\n"
+    script_content += "}\n"
+    script_content += "trap 'kill_remote_jobs' SIGINT\n\n"
+
     commands = []
     rank_start = 0
     for hostname, rank_count in hosts:
@@ -39,7 +46,8 @@ def generate_master_script(hosts, world_size, args):
 
     # Write the commands to the script using parallel
     script_content += "parallel --halt-on-error now,fail=1 --lb ::: \\\n"
-    script_content += "    \"" + "\" \\\n    \"".join(commands) + "\"\n"
+    script_content += "    \"" + "\" \\\n    \"".join(commands) + "\"\n\n"
+    script_content += "trap - SIGINT\n"
 
     script_filename = "run_all_hosts.sh"
     with open(script_filename, 'w') as script_file:
