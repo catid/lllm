@@ -49,7 +49,7 @@ def main():
     parser.add_argument('--rank_start', type=int, default=0, help="First rank for this node.")
     parser.add_argument('--rank_count', type=int, default=1, help="Number of shards for this node.")
     parser.add_argument('--world_size', type=int, default=1, help="Total number of shards.")
-    parser.add_argument('--output_dir', type=str, default="dataset_shard", help="Output directory.")
+    parser.add_argument('--output_dir', type=str, default="~/dataset_shard", help="Output directory.")
 
     args = parser.parse_args()
 

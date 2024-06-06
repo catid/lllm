@@ -3,7 +3,7 @@ import paramiko
 import concurrent.futures
 
 # Function to execute SSH command on a host
-def execute_ssh_command(hostname, rank_count, total_ranks, args):
+def execute_ssh_command(hostname, rank_start, rank_count, world_size, args):
     try:
         # Initialize SSH client
         ssh = paramiko.SSHClient()
@@ -14,7 +14,7 @@ def execute_ssh_command(hostname, rank_count, total_ranks, args):
 
         # Build the command
         command = (
-            f"~/mambaforge/envs/{args.conda_env}/bin/python ~/lllm/dataset/shard_dataset.py {total_ranks} {rank_count} {args.dataset_location}"
+            f"~/mambaforge/envs/{args.conda_env}/bin/python ~/lllm/dataset/shard_dataset.py --dataset_dir {args.dataset_dir} --rank_start {rank_start} --rank_count {rank_count} --world_size {world_size} --output_dir {args.output_dir}"
         )
         
         # Execute the command
@@ -51,7 +51,8 @@ def read_hosts(file_path):
 def main():
     parser = argparse.ArgumentParser(description="Run a Python script on multiple hosts via SSH.")
     parser.add_argument('--hosts-file', type=str, default="hosts.txt", help="Path to the hosts file (default: hosts.txt).")
-    parser.add_argument('--dataset-location', type=str, default="/mnt/Media/datasets/fineweb-edu", help="Dataset location.")
+    parser.add_argument('--dataset-dir', type=str, default="/mnt/Media/datasets/fineweb-edu", help="Dataset location.")
+    parser.add_argument('--output-dir', type=str, default="~/dataset_shard", help="Output shard directory.")
     parser.add_argument('--conda-env', type=str, default="lllm", help="Conda environment name.")
     parser.add_argument('--username', type=str, default=None, help="SSH username.")
 
@@ -61,25 +62,32 @@ def main():
     hosts = read_hosts(args.hosts_file)
     
     # Calculate total ranks in the cluster
-    total_ranks = sum(rank for _, rank in hosts)
+    world_size = sum(rank for _, rank in hosts)
 
-    if total_ranks <= 0:
+    if world_size <= 0:
         print("Error: No hosts found in the hosts file.")
         return
 
-    print(f"Total ranks: {total_ranks} across {len(hosts)} hosts.  Launching `shard_dataset.py` on each host...")
+    print(f"World size: {world_size} across {len(hosts)} hosts.  Launching `shard_dataset.py` on each host...")
 
     # Use a thread pool to execute SSH commands in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(hosts)) as executor:
-        future_to_host = {executor.submit(execute_ssh_command, host, rank, total_ranks, args): (host, rank) for host, rank in hosts}
+        future_to_host = {}
+        rank_start = 0
+        for host, rank_count in hosts:
+            future = executor.submit(execute_ssh_command, rank_start, rank_count, world_size, args)
+
+            rank_start += rank_count
+
+            future_to_host[future] = (host, rank_count)
 
         for future in concurrent.futures.as_completed(future_to_host):
-            host, rank = future_to_host[future]
+            host, rank_count = future_to_host[future]
             try:
                 result = future.result()
-                print(result)
+                print(f"Host {host}:{rank_count} completed with result: {result}")
             except Exception as exc:
-                print(f"{host} (rank {rank}) generated an exception: {exc}")
+                print(f"{host}:{rank_count} generated an exception: {exc}")
 
 if __name__ == "__main__":
     main()
