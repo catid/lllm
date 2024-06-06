@@ -34,7 +34,6 @@ cd dataset
 
 conda activate lllm
 
-python launch_shard_dataset.py
+python make_shard_script.py --dataset-dir /mnt/Media/datasets/fineweb-edu --output-dir ~/dataset_shard
 ```
 
-If you get an `Authentication failed` error, it is because you have not run the `playbooks/install_ssh_key.sh` script on this machine yet.

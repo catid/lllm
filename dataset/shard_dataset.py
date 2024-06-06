@@ -55,6 +55,8 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
+    print(f"Processing shards {args.rank_start} to {args.rank_start + args.rank_count - 1} of {args.world_size} across {args.rank_count} nodes.")
+
     # Initialize the tokenizer
     tokenizer = tiktoken.encoding_for_model("gpt-4o")
 
