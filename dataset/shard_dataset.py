@@ -78,7 +78,7 @@ def print_progress_bar(args, iteration, total, start_time, bar_length=40):
     eta_str = time.strftime("%H:%M:%S", time.gmtime(eta))
     bar_filled = int(bar_length * iteration // total)
     bar = '#' * bar_filled + '-' * (bar_length - bar_filled)
-    print(f"[Ranks {args.rank_start}-{args.rank_start + args.rank_count - 1}] {percent}% [{bar}] {elapsed_time_str} / {eta_str}")
+    print(f"[Ranks {args.rank_start}-{args.rank_start + args.rank_count - 1}] [{bar}] {elapsed_time_str} / {eta_str} {percent}%")
 
 def tokenizer_worker(queue, output_queue):
     tokenizer = tiktoken.encoding_for_model("gpt-4o")
