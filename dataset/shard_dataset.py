@@ -28,22 +28,25 @@ def split_array(arr, max_size=4):
     return result
 
 def read_parquet_file(file_paths, args, queue):
-    for file_path in file_paths:
-        pfile = pq.ParquetFile(file_path)
+    try:
+        for file_path in file_paths:
+            pfile = pq.ParquetFile(file_path)
 
-        shard_size = (pfile.num_row_groups + args.world_size - 1) // args.world_size
-        start_index = args.rank_start * shard_size
-        end_index = min(start_index + shard_size, pfile.num_row_groups)
+            shard_size = (pfile.num_row_groups + args.world_size - 1) // args.world_size
+            start_index = args.rank_start * shard_size
+            end_index = min(start_index + shard_size, pfile.num_row_groups)
 
-        indices = list(range(start_index, end_index))
-        subsets = split_array(indices, max_size=32)
+            indices = list(range(start_index, end_index))
+            subsets = split_array(indices, max_size=32)
 
-        for group_subset in subsets:
-            group = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
+            for group_subset in subsets:
+                group = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
 
-            for row in group:
-                text = str(row[0])
-                queue.put(text)
+                for row in group:
+                    text = str(row[0])
+                    queue.put(text)
+    except Exception as e:
+        print(f"Error processing {file_paths}: {e}")
 
 def read_parquet_files(parquet_files, args, queue):
     total_files = len(parquet_files)
@@ -70,8 +73,7 @@ def print_progress_bar(args, iteration, total, start_time, bar_length=40):
     eta_str = time.strftime("%H:%M:%S", time.gmtime(eta))
     bar_filled = int(bar_length * iteration // total)
     bar = '#' * bar_filled + '-' * (bar_length - bar_filled)
-    sys.stdout.write(f"\r[Ranks {args.rank_start}-{args.rank_start + args.rank_count - 1}] {percent}% [{bar}] {elapsed_time_str} / {eta_str}")
-    sys.stdout.flush()
+    print(f"[Ranks {args.rank_start}-{args.rank_start + args.rank_count - 1}] {percent}% [{bar}] {elapsed_time_str} / {eta_str}")
 
 def main():
     parser = argparse.ArgumentParser(description="Read and process shards of a Parquet file.")
