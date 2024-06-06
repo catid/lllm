@@ -6,9 +6,9 @@ import os
 import glob
 import argparse
 import tiktoken
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from multiprocessing import Process, Queue
 import sys
-from threading import Semaphore
+from multiprocessing import Semaphore
 
 def get_parquet_files(directory):
     parquet_files = []
@@ -21,12 +21,13 @@ def read_parquet(file_path):
     df = pd.read_parquet(file_path)
     return df
 
-def tokenize_and_write(data_prep, tokenizer, text, semaphore):
+def tokenize_and_write(data_prep, tokenizer, text, semaphore, result_queue):
     #tokenized_text = tokenizer.encode(text)
     #data_prep.write_tokenized_text(tokenized_text)
     semaphore.release()
+    result_queue.put(True)  # Signal that the task is complete
 
-def process_shard(data_prep, df, args, tokenizer):
+def process_shard(data_prep, df, args, tokenizer, result_queue):
     # Split the DataFrame into shards
     shard_size = (len(df) + args.world_size - 1) // args.world_size
     start_index = args.rank_start * shard_size
@@ -38,16 +39,18 @@ def process_shard(data_prep, df, args, tokenizer):
 
     shard = df.iloc[start_index:end_index]
 
-    semaphore = Semaphore(16)  # Limit to 16 concurrent tasks
-    with ThreadPoolExecutor() as executor:
-        futures = []
-        for line in shard.itertuples(index=False, name=None):
-            semaphore.acquire()
-            text = " ".join(map(str, line))  # Convert the tuple to a single string
-            futures.append(executor.submit(tokenize_and_write, data_prep, tokenizer, text, semaphore))
+    # Use a context manager for the Semaphore to ensure it's released correctly
+    with Semaphore(16) as semaphore:
+        with Pool(processes=cpu_count()) as pool:  # Use all available cores
+            results = []
+            for line in shard.itertuples(index=False, name=None):
+                semaphore.acquire()
+                text = " ".join(map(str, line))  # Convert the tuple to a single string
+                results.append(pool.apply_async(tokenize_and_write, (data_prep, tokenizer, text, semaphore, result_queue)))
 
-        for future in as_completed(futures):
-            future.result()  # Raise exceptions if any
+            # Wait for all tasks to complete
+            for result in results:
+                result.get()  # Raise exceptions if any
 
 def print_progress_bar(args, iteration, total, start_time, bar_length=40):
     percent = f"{100 * (iteration / float(total)):.1f}"
@@ -86,7 +89,11 @@ def main():
 
     for i, file_path in enumerate(parquet_files):
         df = read_parquet(file_path)
-        process_shard(data_prep, df, args, tokenizer)
+
+        result_queue = Queue()
+        p = Process(target=process_shard, args=(data_prep, df, args, tokenizer, result_queue))
+        p.start()
+        p.join()  # Wait for the process to finish
 
         print_progress_bar(args, i + 1, total_files, start_time)
 
