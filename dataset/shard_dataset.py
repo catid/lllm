@@ -34,7 +34,7 @@ def process_shard(data_prep, df, args, tokenizer):
 
     shard = df.iloc[start_index:end_index]
 
-    with ThreadPoolExecutor(max_workers=16) as executor:  # Limit to 16 threads
+    with ThreadPoolExecutor() as executor:
         futures = []
         for line in shard.itertuples(index=False, name=None):
             text = " ".join(map(str, line))  # Convert the tuple to a single string
@@ -56,7 +56,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Initialize the tokenizer
-    tokenizer = tiktoken.encoding_for_model("gpt-4")
+    tokenizer = tiktoken.encoding_for_model("gpt-4o")
 
     parquet_files = get_parquet_files(args.dataset_dir)
 
