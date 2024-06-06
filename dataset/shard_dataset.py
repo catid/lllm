@@ -38,8 +38,6 @@ def read_parquet_file(file_paths, args, queue):
         indices = list(range(start_index, end_index))
         subsets = split_array(indices, max_size=32)
 
-        print(f"{file_path}: Processing {len(subsets)} subsets of {len(indices)} rows of {pfile.num_row_groups} row groups")
-
         for group_subset in subsets:
             group = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
 
