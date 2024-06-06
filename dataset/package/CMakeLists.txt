@@ -23,7 +23,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)
+#find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)
 
 # Third-party source files
 file(GLOB_RECURSE URING_SRC_FILES "${CMAKE_CURRENT_SOURCE_DIR}/uring/*.c")
@@ -64,11 +64,11 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/cpppath
     ${CMAKE_CURRENT_SOURCE_DIR}/worker_pool
     ${CMAKE_CURRENT_SOURCE_DIR}/zstd
-    ${Python3_INCLUDE_DIRS}
-    ${Python3_NumPy_INCLUDE_DIRS}
+    #${Python3_INCLUDE_DIRS}
+    #${Python3_NumPy_INCLUDE_DIRS}
 )
 target_link_libraries(${PROJECT_NAME} PUBLIC
-    ${Python3_LIBRARIES}
+    #${Python3_LIBRARIES}
     Threads::Threads
 )
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "") # remove lib prefix
