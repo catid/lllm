@@ -4,6 +4,7 @@ Optimized C++ dataloader for dataset.
 
 The scripts convert downloaded HuggingFace datasets into this format by tokenizing the text into context-aligned batches and compressing each one into 4 GB files with an index to look up the pieces.  This also supports a hash to check the integrity of the data.
 
+
 ## Setup
 
 Install the `cpp_dataloader` pip package:
@@ -19,6 +20,7 @@ Verify that it is working:
 ```bash
 python python test_cpp_dataloader.py
 ```
+
 
 ## Debugging
 
@@ -42,6 +44,7 @@ make -j
 ./test_data_prep
 ./test_data_loader
 ```
+
 
 ## Thanks
 

@@ -55,8 +55,13 @@
         cd "{{ lookup('env', 'HOME') }}/lllm"
         "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/pip" install -U -r requirements.txt
 
+    - name: Build C++ dataloader
+      shell: |
+        cd "{{ lookup('env', 'HOME') }}/lllm/dataset/cpp_dataloader"
+        rm -rf build dist cpp_dataloader.egg-info
+        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/python" -m build
+
     - name: Install C++ dataloader
       shell: |
         cd "{{ lookup('env', 'HOME') }}/lllm/dataset/cpp_dataloader"
-        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/python" -m build
-        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/pip" install --force-reinstall "{{ lookup('env', 'HOME') }}/lllm/dataset/cpp_dataloader/dist/*.whl"
+        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/pip" install --force-reinstall "{{ lookup('env', 'HOME') }}/lllm/dataset/cpp_dataloader/dist/cpp_dataloader-0.1.0-cp310-cp310-linux_x86_64.whl"
