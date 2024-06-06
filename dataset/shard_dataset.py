@@ -27,41 +27,43 @@ def split_array(arr, max_size=4):
         i += len(sub_arr)
     return result
 
-def read_parquet_file(file_paths, args, queue):
+def read_parquet_file(file_path, args, queue):
     try:
-        for file_path in file_paths:
-            pfile = pq.ParquetFile(file_path)
+        pfile = pq.ParquetFile(file_path)
 
-            shard_size = (pfile.num_row_groups + args.world_size - 1) // args.world_size
-            start_index = args.rank_start * shard_size
-            end_index = min(start_index + shard_size, pfile.num_row_groups)
+        shard_size = (pfile.num_row_groups + args.world_size - 1) // args.world_size
+        start_index = args.rank_start * shard_size
+        end_index = min(start_index + shard_size, pfile.num_row_groups)
 
-            indices = list(range(start_index, end_index))
-            subsets = split_array(indices, max_size=32)
+        indices = list(range(start_index, end_index))
+        subsets = split_array(indices, max_size=64)
 
-            for group_subset in subsets:
-                group = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
+        for group_subset in subsets:
+            group = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
 
-                for row in group:
-                    text = str(row[0])
-                    queue.put(text)
+            for row in group:
+                text = str(row[0])
+                queue.put(text)
     except Exception as e:
-        print(f"Error processing {file_paths}: {e}")
+        print(f"Error processing {file_path}: {e}")
 
 def read_parquet_files(parquet_files, args, queue):
     total_files = len(parquet_files)
     start_time = time.time()
     processed_files = 0
 
-    arrays = split_array(parquet_files, max_size=1)
+    arrays = split_array(parquet_files, max_size=8)
 
     for files in arrays:
-        process = Process(target=read_parquet_file, args=(files, args, queue))
-        process.start()
-        process.join()
-
-        processed_files += len(files)
-        print_progress_bar(args, processed_files, total_files, start_time)
+        processes = []
+        for file_path in files:
+            process = Process(target=read_parquet_file, args=(file_path, args, queue))
+            process.start()
+            processes.append(process)
+        for process in processes:
+            process.join()
+            processed_files += 1
+            print_progress_bar(args, processed_files, total_files, start_time)
 
     queue.put(None)  # Sentinel to indicate completion
 
@@ -100,8 +102,8 @@ def main():
         if text is None:  # Check for the sentinel value
             break
 
-        tokenized_text = tokenizer.encode(text)
-        data_prep.write_tokenized_text(tokenized_text)
+        #tokenized_text = tokenizer.encode(text)
+        #data_prep.write_tokenized_text(tokenized_text)
 
     process.join()
     data_prep.destroy()
