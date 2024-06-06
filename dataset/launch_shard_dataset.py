@@ -75,7 +75,7 @@ def main():
         future_to_host = {}
         rank_start = 0
         for host, rank_count in hosts:
-            future = executor.submit(execute_ssh_command, rank_start, rank_count, world_size, args)
+            future = executor.submit(execute_ssh_command, (rank_start, rank_count, world_size, args))
 
             rank_start += rank_count
 
