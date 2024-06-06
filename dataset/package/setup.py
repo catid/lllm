@@ -38,7 +38,10 @@ setup(
     ext_modules=[CMakeExtension("cpp_dataloader")],
     cmdclass={"build_ext": CMakeBuild},
     package_data={
-        'cpp_dataloader': ['cpp_dataloader.so'],
+        'cpp_dataloader': ['cpp_dataloader.so', 'cpp_dataloader_wrapper.py'],
     },
     include_package_data=True,
+    install_requires=[
+        'numpy',
+    ],
 )
