@@ -53,6 +53,8 @@ def main():
 
     args = parser.parse_args()
 
+    os.makedirs(args.output_dir, exist_ok=True)
+
     # Initialize the tokenizer
     tokenizer = tiktoken.encoding_for_model("gpt-4")
 
