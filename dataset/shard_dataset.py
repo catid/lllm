@@ -23,7 +23,7 @@ def read_parquet(file_path):
 
 def tokenize_and_write(data_prep, tokenizer, text, semaphore):
     tokenized_text = tokenizer.encode(text)
-    data_prep.write_tokenized_text(tokenized_text)
+    #data_prep.write_tokenized_text(tokenized_text)
     semaphore.release()
 
 def process_shard(data_prep, df, args, tokenizer):
