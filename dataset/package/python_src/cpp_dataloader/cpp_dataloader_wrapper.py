@@ -11,6 +11,7 @@ so_file_name = "cpp_dataloader_library.so"
 lib_path = None
 for path in site_packages_paths:
     potential_path = os.path.join(path, so_file_name)
+    print(f"Checking {potential_path}")
     if os.path.exists(potential_path):
         lib_path = potential_path
         break

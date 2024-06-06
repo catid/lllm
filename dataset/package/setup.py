@@ -15,7 +15,10 @@ class CMakeBuild(build_ext):
             self.build_extension(ext)
 
     def build_extension(self, ext):
-        cmake_args = []
+        extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
+        cmake_args = [
+            f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
+        ]
         build_args = ["--config", "Release"]
 
         num_threads = multiprocessing.cpu_count() - 1
