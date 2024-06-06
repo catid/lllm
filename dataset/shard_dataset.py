@@ -38,10 +38,6 @@ def read_parquet_file(file_path, args, queue):
         indices = list(range(start_index, end_index))
         subsets = split_array(indices, max_size=4)
 
-        print(f"Processing rows {pfile.num_row_groups} subsets from {file_path}")
-
-        count = 0
-
         for group_subset in subsets:
             groups = pfile.read_row_groups(row_groups=group_subset, columns=["text"])
 
@@ -49,10 +45,8 @@ def read_parquet_file(file_path, args, queue):
                 rows = group.to_pylist()
 
                 for row in rows:
-                    count += 1
                     queue.put(row)
 
-        print(f"Processed {count} rows from {file_path}")
     except Exception as e:
         print(f"Error processing {file_path}: {e}")
 
