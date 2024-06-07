@@ -10,6 +10,7 @@ import numpy as np
 import random, time, json
 import shutil
 import argparse
+import yaml
 
 import wandb
 
@@ -115,7 +116,7 @@ def save_deepspeed_model_engine(model_engine, fp16, args):
 
     torch.save(fixed_state_dict, args.output_model)
 
-def main(args):
+def main(args, shard_config):
     t0 = time.time()
 
     # Initialize DeepSpeed
@@ -125,6 +126,7 @@ def main(args):
     )
 
     cfg = LatentLanguageConfig()
+    cfg.vocab_size = shard_config["n_vocab"]
     model = LatentLanguage(cfg)
 
     optimizer = schedulefree.AdamWScheduleFree(
@@ -282,6 +284,11 @@ def main(args):
             wandb.log({"best_val_loss": best_val_loss, "best_val_acc": best_val_acc})
             wandb.finish()
 
+def read_yaml_file(file_path):
+    with open(file_path, 'r') as file:
+        data = yaml.safe_load(file)
+    return data
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training")
 
@@ -292,7 +299,7 @@ if __name__ == "__main__":
     parser.add_argument("--output-model", type=str, default="cifar10.pth", help="Output model file name")
 
     # Dataset
-    parser.add_argument("--dataset", type=str, default="~/dataset_shard", help="Dataset directory")
+    parser.add_argument("--dataset-dir", type=str, default="~/dataset_shard", help="Dataset directory")
     parser.add_argument("--verify-dataset", action="store_true", help="Verify the dataset before training")
 
     # Misc
@@ -321,18 +328,24 @@ if __name__ == "__main__":
     if args.deepspeed_config==None or len(args.deepspeed_config)==0:
         args.deepspeed_config = "deepspeed_config.json"
 
-    if not os.path.exists(args.dataset):
-        raise RuntimeError(f"Dataset directory {args.dataset} does not exist")
+    args.dataset_dir = os.path.expanduser(args.dataset_dir)
+
+    if not os.path.exists(args.dataset_dir):
+        raise RuntimeError(f"Dataset directory {args.dataset_dir} does not exist")
+
+    args_path = os.path.join(args.dataset_dir, "args.yml")
+    shard_config = read_yaml_file(args_path)
+
+    print(f"Shard config: {shard_config}")
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
     if args.verify_dataset:
-        is_valid = DataVerifier.verify(args.dataset)
+        print("Verifying dataset... (should take about a minute)")
+        is_valid = DataVerifier.verify(args.dataset_dir)
 
         if not is_valid:
             raise RuntimeError("Dataset is corrupted and must be regenerated using dataset/shard_dataset.py")
 
-    exit()
-
-    main(args)
+    #main(args, shard_config)
