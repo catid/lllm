@@ -14,10 +14,17 @@ import tempfile
 import torch
 import yaml
 
-def save_args_to_yaml(args):
+def save_args_to_yaml(args, additional_keys=None):
+    args_dict = vars(args)
+    
+    if additional_keys:
+        args_dict.update(additional_keys)
+    
     args_file = os.path.join(args.output_dir, "args.yml")
+    
     with open(args_file, 'w') as f:
-        yaml.dump(vars(args), f, default_flow_style=False)
+        yaml.dump(args_dict, f, default_flow_style=False)
+    
     print(f"Arguments saved to {args_file}")
 
 def get_parquet_files(directory):
@@ -88,8 +95,8 @@ def print_progress_bar(args, iteration, total, start_time, bar_length=40):
     bar = '#' * bar_filled + '-' * (bar_length - bar_filled)
     print(f"[Ranks {args.rank_start}-{args.rank_start + args.rank_count - 1}] [{bar}] {elapsed_time_str} / {eta_str} {percent}%")
 
-def tokenizer_worker(queue, output_queue):
-    tokenizer = tiktoken.encoding_for_model("gpt-4o")
+def tokenizer_worker(encoding, queue, output_queue):
+    tokenizer = tiktoken.get_encoding(encoding)
 
     while True:
         text = queue.get()
@@ -107,17 +114,30 @@ def main():
     parser.add_argument('--rank_count', type=int, default=1, help="Number of shards for this node.")
     parser.add_argument('--world_size', type=int, default=1, help="Total number of shards.")
     parser.add_argument('--output_dir', type=str, default="dataset_shard", help="Output directory.")
+    parser.add_argument('--encoding', type=str, default="o200k_base", help="Tiktoken encoding.")
+    parser.add_argument("--just_args", action="store_true", help="Just write the args file and exit.")
 
     args = parser.parse_args()
 
     if args.rank_count != torch.cuda.device_count():
-        raise RuntimeError("The --rank_count argument must match the number of GPUs.  Check your `hosts.txt` file configuration.")
+        raise RuntimeError("Your --rank_count parameter must match the number of GPUs.  Check your `hosts.txt` file configuration.")
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    save_args_to_yaml(args)
+    # Write some extra keys to the args file
 
-    exit()
+    tokenizer = tiktoken.get_encoding(args.encoding)
+    n_vocab = tokenizer.max_token_value + 1
+
+    extra_keys = {
+        "n_vocab": n_vocab
+    }
+
+    save_args_to_yaml(args, extra_keys)
+
+    if args.just_args:
+        print("Just wrote the args file.  Exiting.")
+        return
 
     data_prep = DataPreparation(args.output_dir)
 
@@ -131,7 +151,7 @@ def main():
     # Create a pool of tokenizer worker processes
     pool = []
     for _ in range(16):
-        p = Process(target=tokenizer_worker, args=(queue, out_queue))
+        p = Process(target=tokenizer_worker, args=(args.encoding, queue, out_queue))
         p.start()
         pool.append(p)
 

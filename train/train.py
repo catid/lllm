@@ -321,6 +321,9 @@ if __name__ == "__main__":
     if args.deepspeed_config==None or len(args.deepspeed_config)==0:
         args.deepspeed_config = "deepspeed_config.json"
 
+    if not os.path.exists(args.dataset):
+        raise RuntimeError(f"Dataset directory {args.dataset} does not exist")
+
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
@@ -329,5 +332,7 @@ if __name__ == "__main__":
 
         if not is_valid:
             raise RuntimeError("Dataset is corrupted and must be regenerated using dataset/shard_dataset.py")
+
+    exit()
 
     main(args)

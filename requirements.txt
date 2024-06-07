@@ -3,8 +3,9 @@ numpy
 einops
 pytest
 tqdm
-flash_attn
 pyyaml
+mamba_ssm
+git+https://github.com/sustcsonglin/flash-linear-attention
 
 # Dataset dependencies
 build

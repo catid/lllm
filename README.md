@@ -23,10 +23,6 @@ Follow the instructions in the `train/` directory.
 
 # Ideas
 
-* ReMoRa with Sophia optimizer https://github.com/Liuhong99/Sophia/blob/main/sophia.py
-* Speedup https://github.com/Liuhong99/Sophia/pull/35
-
-* Non-causal prompt processing for first half of the sequence, causal for the second half - This would allow us to do some kind of rolling context compression for long sequences
 * Take LLaMA-3 70B Instruct-tuned output from each data chunk, and train the model to generate the same continuations (a way to skip fine-tuning?)
 * RHO-loss for the dataset using LLaMA-3 8B to provide reference loss for each token - need to convert to our tokenizer via approximation
 * Produce 4 tokens at once using 4x MLP heads
@@ -38,6 +34,9 @@ Follow the instructions in the `train/` directory.
 * RWKV-6 for first half, Mix GLA and 20% Full attention for second half of YOCO
 * https://github.com/sustcsonglin/flash-linear-attention for implementations of fast linear attention
 * RWKV-6: https://github.com/Ronsor/rwkv-simple
+
+
+* https://github.com/HazyResearch/ThunderKittens
 
 
 FP16 training performance/watt:

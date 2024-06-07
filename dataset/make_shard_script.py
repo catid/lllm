@@ -27,15 +27,19 @@ def generate_master_script(hosts, world_size, args):
     commands = []
     rank_start = 0
     for hostname, rank_count in hosts:
-        command = (
-            f"~/mambaforge/envs/{args.conda_env}/bin/python ~/lllm/dataset/shard_dataset.py "
-            f"--dataset_dir {args.dataset_dir} "
-            f"--rank_start {rank_start} "
-            f"--rank_count {rank_count} "
-            f"--world_size {world_size} "
+        command_parts = [
+            f"{args.conda_dir}/envs/{args.conda_env}/bin/python {args.source_dir}/shard_dataset.py",
+            f"--dataset_dir {args.dataset_dir}",
+            f"--rank_start {rank_start}",
+            f"--rank_count {rank_count}",
+            f"--world_size {world_size}",
             f"--output_dir {args.output_dir}"
-        )
-        
+        ]
+        if args.just_args:
+            command_parts.append("--just_args")
+
+        command = " ".join(command_parts)
+
         if args.username:
             pdsh_command = f"pdsh -R ssh -w {args.username}@{hostname} '{command}'"
         else:
@@ -61,8 +65,11 @@ def main():
     parser.add_argument('--hosts-file', type=str, default="hosts.txt", help="Path to the hosts file (default: hosts.txt).")
     parser.add_argument('--dataset-dir', type=str, default="/mnt/Media/datasets/fineweb-edu", help="Dataset location.")
     parser.add_argument('--output-dir', type=str, default="~/dataset_shard", help="Output shard directory.")
+    parser.add_argument('--source-dir', type=str, default="~/llm/dataset", help="Source directory.")
     parser.add_argument('--conda-env', type=str, default="lllm", help="Conda environment name.")
+    parser.add_argument('--conda-dir', type=str, default="~/mambaforge", help="Conda environment directory.")
     parser.add_argument('--username', type=str, default=None, help="SSH username.")
+    parser.add_argument("--just_args", action="store_true", help="Just write the args file and exit.")
 
     args = parser.parse_args()
     
