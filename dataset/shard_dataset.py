@@ -115,9 +115,9 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    exit()
-
     save_args_to_yaml(args)
+
+    exit()
 
     data_prep = DataPreparation(args.output_dir)
 
