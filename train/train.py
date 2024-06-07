@@ -1,12 +1,7 @@
 # Set the environment variables
 import os
 
-from datasets import load_dataset
-from datasets.distributed import split_dataset_by_node
-
 from model.model import LatentLanguage, LatentLanguageConfig
-
-import schedulefree # optimizer
 
 import torch
 import torch.nn as nn
@@ -23,7 +18,11 @@ from deepspeed import comm
 from deepspeed import log_dist
 from deepspeed.runtime.config import DeepSpeedConfig
 
+from cpp_dataloader import DataLoader, DataVerifier
 from mora import MoRALayer, merge_mora_weights, replace_linear_with_mora
+
+from sophia import SophiaG
+import schedulefree
 
 # Enable cuDNN benchmarking to improve online performance
 torch.backends.cudnn.benchmark = True
@@ -101,36 +100,6 @@ def train_one_epoch(optimizer, lr_scheduler, criterion, model_engine, train_load
 
     train_loss /= num_batches
     return train_loss
-
-def validation_one_epoch(criterion, model_engine, val_loader):
-    model_engine.eval()
-    val_loss = 0.0
-    correct = 0
-    total = 0
-    num_batches = len(val_loader)
-
-    with torch.no_grad():
-        for batch in val_loader:
-            input_ids = batch["input_ids"].to(model_engine.device)
-            attention_mask = batch["attention_mask"].to(model_engine.device)
-            labels = input_ids.clone()
-
-            outputs = model_engine(input_ids, attention_mask=attention_mask, labels=labels)
-            logits = outputs.logits
-
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-
-            loss = criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            val_loss += loss.item()
-
-            _, predicted = shift_logits.max(dim=-1)
-            total += shift_labels.numel()
-            correct += predicted.eq(shift_labels).sum().item()
-
-    val_loss /= num_batches
-    accuracy = 100.0 * correct / total
-    return val_loss, correct, total, accuracy
 
 def save_deepspeed_model_engine(model_engine, fp16, args):
     # Write output .pth file
@@ -235,27 +204,16 @@ def main(args):
         else:
             log_all("No checkpoint found - Starting training from scratch")
 
-    # Load the dataset
-    dataset = load_dataset("allenai/dolma", split="train", name="v1_6-sample")
-
-    def tokenize_function(examples):
-        return tokenizer(examples["text"], padding="max_length", truncation=True, return_tensors="pt", max_length=1024)
-
-    split_dataset = split_dataset_by_node(dataset, rank=shard_id, world_size=num_gpus)
-
-    tokenized_dataset = split_dataset.map(tokenize_function, batched=True, num_proc=24, remove_columns=["text"])
-
-    train_dataloader = torch.utils.data.DataLoader(
-        tokenized_dataset, batch_size=data_loader_batch_size, collate_fn=data_collator, shuffle=True
-    )
+    # DataLoader
+    local_ranks = torch.cuda.device_count() # must match dataset shards
+    # FIXME: How to check this at runtime?
+    dataloader = DataLoader(args.dataset, rank=rank, local_ranks=local_ranks)
 
     for epoch in range(start_epoch, args.max_epochs):
         end_epoch = epoch
         start_time = time.time()
 
         train_loss = train_one_epoch(optimizer, criterion, model_engine, tokenized_dataset)
-
-        val_loss, correct, total, examples = validation_one_epoch(criterion, model_engine, tokenized_dataset)
 
         end_time = time.time()
         epoch_time = end_time - start_time
@@ -333,6 +291,10 @@ if __name__ == "__main__":
     parser.add_argument("--reset", action="store_true", help="Reset training from scratch")
     parser.add_argument("--output-model", type=str, default="cifar10.pth", help="Output model file name")
 
+    # Dataset
+    parser.add_argument("--dataset", type=str, default="~/dataset_shard", help="Dataset directory")
+    parser.add_argument("--verify-dataset", action="store_true", help="Verify the dataset before training")
+
     # Misc
     parser.add_argument("--seed", type=int, default=-1, help="Seed for random numbers.  Set to -1 to pick a fully random seed")
     parser.add_argument("--compile", action="store_true", help="Enable torch.compile")
@@ -361,5 +323,11 @@ if __name__ == "__main__":
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
+
+    if args.verify_dataset:
+        is_valid = DataVerifier.verify(args.dataset)
+
+        if not is_valid:
+            raise RuntimeError("Dataset is corrupted and must be regenerated using dataset/shard_dataset.py")
 
     main(args)

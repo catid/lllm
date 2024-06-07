@@ -11,6 +11,14 @@ import tiktoken
 from cpp_dataloader import DataPreparation
 import shutil
 import tempfile
+import torch
+import yaml
+
+def save_args_to_yaml(args):
+    args_file = os.path.join(args.output_dir, "args.yml")
+    with open(args_file, 'w') as f:
+        yaml.dump(vars(args), f, default_flow_style=False)
+    print(f"Arguments saved to {args_file}")
 
 def get_parquet_files(directory):
     parquet_files = []
@@ -102,7 +110,14 @@ def main():
 
     args = parser.parse_args()
 
+    if args.rank_count != torch.cuda.device_count():
+        raise RuntimeError("The --rank_count argument must match the number of GPUs.  Check your `hosts.txt` file configuration.")
+
     os.makedirs(args.output_dir, exist_ok=True)
+
+    exit()
+
+    save_args_to_yaml(args)
 
     data_prep = DataPreparation(args.output_dir)
 

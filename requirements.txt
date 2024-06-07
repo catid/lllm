@@ -4,6 +4,7 @@ einops
 pytest
 tqdm
 flash_attn
+pyyaml
 
 # Dataset dependencies
 build
@@ -13,10 +14,6 @@ pyarrow
 # Meta products
 torch
 schedulefree
-
-# HuggingFace products
-huggingface_hub[cli]
-datasets
 
 # Microsoft products
 deepspeed
