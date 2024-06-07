@@ -3,6 +3,7 @@ numpy
 einops
 pytest
 tqdm
+flash_attn
 
 # Dataset dependencies
 build

@@ -23,6 +23,8 @@ from deepspeed import comm
 from deepspeed import log_dist
 from deepspeed.runtime.config import DeepSpeedConfig
 
+from mora import MoRALayer, merge_mora_weights, replace_linear_with_mora
+
 # Enable cuDNN benchmarking to improve online performance
 torch.backends.cudnn.benchmark = True
 
