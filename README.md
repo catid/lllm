@@ -37,6 +37,7 @@ Follow the instructions in the `train/` directory.
 
 
 * https://github.com/HazyResearch/ThunderKittens
+* Sharing FFN weights onion-style https://arxiv.org/abs/2104.06022
 
 
 FP16 training performance/watt:

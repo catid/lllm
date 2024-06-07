@@ -10,6 +10,8 @@
 #include <mapped_file.hpp>
 #include <city.h>
 
+#include <signal.h>
+
 
 //------------------------------------------------------------------------------
 // GlobalIndexYaml
@@ -546,6 +548,8 @@ bool verify_files(
     return true;
 }
 
+static std::atomic<bool> m_early_stop_flag = ATOMIC_VAR_INIT(false);
+
 bool VerifyDataset(const std::string& data_folder_path)
 {
     GlobalIndexYaml global_index_yaml;
@@ -562,14 +566,23 @@ bool VerifyDataset(const std::string& data_folder_path)
 
     const uint64_t t0 = GetNsec();
 
+    m_early_stop_flag = false;
+
+    signal(SIGINT, [](int /*signal*/) {
+        m_early_stop_flag = true;
+    });
+
     const int num_files = (int)global_index_yaml.data_files_.size();
-    for (int i = 0; i < num_files; ++i) {
+    for (int i = 0; i < num_files && !m_early_stop_flag; ++i) {
         const std::string& data_file_path = global_index_yaml.data_files_[i];
         const std::string& index_file_path = global_index_yaml.index_files_[i];
 
         const int max_active_tasks = 2;
         pool.QueueTask([t0, &files_verified, num_files, &data_error, data_file_path, index_file_path](int /*worker_index*/) {
             if (data_error) {
+                return;
+            }
+            if (m_early_stop_flag) {
                 return;
             }
             if (!verify_files(index_file_path, data_file_path)) {
@@ -588,6 +601,11 @@ bool VerifyDataset(const std::string& data_folder_path)
         if (data_error) {
             break;
         }
+    }
+
+    if (m_early_stop_flag) {
+        LOG_INFO() << "Early stopping due to SIGINT";
+        return true;
     }
 
     pool.WaitForTasks();

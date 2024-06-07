@@ -17,6 +17,7 @@ torch
 schedulefree
 
 # Microsoft products
+mpi4py
 deepspeed
 
 # OpenAI products

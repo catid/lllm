@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from mamba_ssm import Mamba
+from mamba_ssm import Mamba2
 
 from model.srmsnorm import FastSimpleRMSNorm
 
@@ -31,7 +31,7 @@ class LatentLanguageConfig:
     dim: int = 512 # Narrower
     layers: int = 12 # Small
 
-    d_state: int = 16
+    d_state: int = 64
     d_conv: int = 4
     expand: int = 2
 
@@ -53,7 +53,7 @@ class LatentLanguage(nn.Module):
 
         for _ in range(cfg.layers):
             self.layers.append(nn.ModuleList([
-                Mamba(d_model=cfg.dim, d_state=cfg.d_state, d_conv=cfg.d_conv, expand=cfg.expand),
+                Mamba2(d_model=cfg.dim, d_state=cfg.d_state, d_conv=cfg.d_conv, expand=cfg.expand),
                 SGLULayer(d_in=cfg.dim, mult=cfg.ffn_mult, d_out=cfg.dim, dropout=cfg.dropout, bias=cfg.ffn_bias),
             ]))
 
@@ -67,7 +67,6 @@ class LatentLanguage(nn.Module):
 
         # One extra attention layer at the start
         x = self.norm(x)
-        x = x + self.outer_attn(x)
 
         for attn, ffn in self.layers:
             # Repeat weights for consecutive layers
@@ -77,9 +76,5 @@ class LatentLanguage(nn.Module):
 
                 x = self.norm(x)
                 x = x + ffn(x)
-
-        # One extra FFN layer at the end
-        x = self.norm(x)
-        x = x + self.outer_ffn(x)
 
         return self.lm_head(x)

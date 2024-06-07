@@ -348,4 +348,4 @@ if __name__ == "__main__":
         if not is_valid:
             raise RuntimeError("Dataset is corrupted and must be regenerated using dataset/shard_dataset.py")
 
-    #main(args, shard_config)
+    main(args, shard_config)
