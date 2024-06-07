@@ -18,7 +18,7 @@ Follow the instructions in the `dataset/` directory.
 
 ## (3) Training
 
-Follow the instructions in the `training/` directory.
+Follow the instructions in the `train/` directory.
 
 
 # Ideas
