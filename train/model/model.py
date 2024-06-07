@@ -27,9 +27,9 @@ class SGLULayer(nn.Module):
 
 @dataclass
 class LatentLanguageConfig:
-    vocab_size: int = 65529 # Match RWKV
-    dim: int = 512 # Narrower
-    layers: int = 12 # Small
+    n_vocab: int = 0 # Set to tokenizer n_vocab
+    dim: int = 1024
+    layers: int = 16
 
     d_state: int = 64
     d_conv: int = 4
@@ -44,7 +44,7 @@ class LatentLanguage(nn.Module):
     def __init__(self, cfg):
         super().__init__()
 
-        self.embedding = nn.Embedding(cfg.vocab_size, cfg.dim)
+        self.embedding = nn.Embedding(cfg.n_vocab, cfg.dim)
 
         self.layers = nn.ModuleList()
 
@@ -57,16 +57,13 @@ class LatentLanguage(nn.Module):
                 SGLULayer(d_in=cfg.dim, mult=cfg.ffn_mult, d_out=cfg.dim, dropout=cfg.dropout, bias=cfg.ffn_bias),
             ]))
 
-        self.lm_head = nn.Linear(cfg.dim, cfg.vocab_size)
+        self.lm_head = nn.Linear(cfg.dim, cfg.n_vocab)
 
         # Tie vocab weights
         self.lm_head.weight = self.embedding.weight
 
     def forward(self, x):
         x = self.embedding(x)
-
-        # One extra attention layer at the start
-        x = self.norm(x)
 
         for attn, ffn in self.layers:
             # Repeat weights for consecutive layers

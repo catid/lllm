@@ -20,9 +20,9 @@ from deepspeed import log_dist
 from deepspeed.runtime.config import DeepSpeedConfig
 
 from cpp_dataloader import DataLoader, DataVerifier
-from mora import MoRALayer, merge_mora_weights, replace_linear_with_mora
+#from mora import MoRALayer, merge_mora_weights, replace_linear_with_mora
 
-from sophia import SophiaG
+#from sophia import SophiaG
 import schedulefree
 
 # Enable cuDNN benchmarking to improve online performance
@@ -74,33 +74,33 @@ def delete_folder_contents(folder_path):
         shutil.rmtree(folder_path)
     os.makedirs(folder_path)
 
-def train_one_epoch(optimizer, lr_scheduler, criterion, model_engine, train_loader):
+def train_one_step(optimizer, criterion, model_engine, dataloader):
     model_engine.train()
-    train_loss = 0.0
-    num_batches = len(train_loader)
 
-    for batch in train_loader:
-        input_ids = batch["input_ids"].to(model_engine.device)
-        attention_mask = batch["attention_mask"].to(model_engine.device)
-        labels = input_ids.clone()
+    batch, is_cont = dataloader.get_micro_batch()
 
-        outputs = model_engine(input_ids, attention_mask=attention_mask, labels=labels)
-        logits = outputs.logits
+    if batch is None:
+        return None
 
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = labels[..., 1:].contiguous()
+    print(f"Batch: {batch}, is_cont: {is_cont}")
 
-        loss = criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+    input_ids = batch["input_ids"].to(model_engine.device)
+    attention_mask = batch["attention_mask"].to(model_engine.device)
+    labels = input_ids.clone()
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        lr_scheduler.step()
+    outputs = model_engine(input_ids, attention_mask=attention_mask, labels=labels)
+    logits = outputs.logits
 
-        train_loss += loss.item()
+    shift_logits = logits[..., :-1, :].contiguous()
+    shift_labels = labels[..., 1:].contiguous()
 
-    train_loss /= num_batches
-    return train_loss
+    loss = criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    return loss.item()
 
 def save_deepspeed_model_engine(model_engine, fp16, args):
     # Write output .pth file
@@ -126,7 +126,9 @@ def main(args, shard_config):
     )
 
     cfg = LatentLanguageConfig()
-    cfg.vocab_size = shard_config["n_vocab"]
+    cfg.n_vocab = shard_config["n_vocab"]
+    cfg.dim = 1024
+    cfg.layers = 16
     model = LatentLanguage(cfg)
 
     optimizer = schedulefree.AdamWScheduleFree(
@@ -148,7 +150,7 @@ def main(args, shard_config):
         args=args,
         model=model,
         optimizer=optimizer,
-        lr_scheduler=None, # ScheduleFree does not support LR schedulers
+        lr_scheduler=None, # We do not use LR schedulers
         config=ds_config,
         model_parameters=model.parameters())
 
@@ -183,13 +185,7 @@ def main(args, shard_config):
     if args.compile:
         forward_and_loss = torch.compile(forward_and_loss, dynamic=True, fullgraph=False)
 
-    best_train_loss = float("inf")
-    best_val_loss = float("inf")
-    best_val_acc = float("-inf")
-    avg_val_loss = float("inf")
     start_epoch = 0
-    end_epoch = 0
-    epochs_without_improvement = 0
 
     if args.reset:
         log_0("Resetting training - deleting output directory")
@@ -200,88 +196,51 @@ def main(args, shard_config):
         _, client_state = model_engine.load_checkpoint(load_dir=args.output_dir)
         if client_state is not None:
             start_epoch = client_state['epoch'] + 1
-            avg_val_loss = client_state['avg_val_loss']
-            best_val_loss = avg_val_loss
             log_all(f"Loaded checkpoint at epoch {client_state['epoch']}")
         else:
             log_all("No checkpoint found - Starting training from scratch")
 
     # DataLoader
-    local_ranks = torch.cuda.device_count() # must match dataset shards
-    # FIXME: How to check this at runtime?
-    dataloader = DataLoader(args.dataset, rank=rank, local_ranks=local_ranks)
+    dataloader = DataLoader(args.dataset, rank=rank, local_ranks=shard_config["rank_count"])
 
     for epoch in range(start_epoch, args.max_epochs):
-        end_epoch = epoch
-        start_time = time.time()
+        # This seed is synchronized between ranks so they do not reuse the same data
+        seed2 = epoch
+        dataloader.start_epoch(seed, seed2, args.microbatch, args.context)
 
-        train_loss = train_one_epoch(optimizer, criterion, model_engine, tokenized_dataset)
+        while True:
 
-        end_time = time.time()
-        epoch_time = end_time - start_time
+            start_time = time.time()
 
-        # Sync variables between machines
-        sum_train_loss = torch.tensor(train_loss).cuda(rank)
-        sum_val_loss = torch.tensor(val_loss).cuda(rank)
-        sum_correct = torch.tensor(correct).cuda(rank)
-        sum_total = torch.tensor(total).cuda(rank)
-        comm.all_reduce(tensor=sum_train_loss, op=comm.ReduceOp.SUM)
-        comm.all_reduce(tensor=sum_val_loss, op=comm.ReduceOp.SUM)
-        comm.all_reduce(tensor=sum_correct, op=comm.ReduceOp.SUM)
-        comm.all_reduce(tensor=sum_total, op=comm.ReduceOp.SUM)
+            train_loss = train_one_step(optimizer, criterion, model_engine, dataloader)
 
-        total_train_items = len(train_loader) * num_gpus
-        total_val_items = len(val_loader) * num_gpus
-        comm.barrier()
-        avg_train_loss = sum_train_loss.item() / total_train_items
-        avg_val_loss = sum_val_loss.item() / total_val_items
-        val_acc = 100. * sum_correct / sum_total
+            if train_loss is None:
+                break
+
+            end_time = time.time()
+            epoch_time = end_time - start_time
+
+            # Sync variables between ranks
+            avg_train_loss = torch.tensor(train_loss).cuda(rank)
+            comm.all_reduce(tensor=avg_train_loss, op=comm.ReduceOp.AVG)
+
+            if is_main_process():
+                log_0(f"Step complete - TrainLoss={avg_train_loss:.4f} Time={epoch_time:.2f} sec")
 
         if is_main_process():
-            log_0(f"Epoch {epoch + 1} - TrainLoss={avg_train_loss:.4f}, ValLoss={avg_val_loss:.4f}, ValAcc={val_acc:.2f}%, Time={epoch_time:.2f} sec")
+            log_0(f"Epoch {epoch + 1} - TrainLoss={avg_train_loss:.4f} Time={epoch_time:.2f} sec")
 
             if args.wandb:
                 lr = optimizer.param_groups[0]['lr']
-                wandb.log({"avg_train_loss": avg_train_loss, "val_acc": val_acc, "avg_val_loss": avg_val_loss, "epoch": epoch, "wallclock_time": epoch_time, "lr": lr})
-
-        # Check if validation loss has improved
-        if val_acc > best_val_acc:
-            best_val_loss = avg_val_loss
-            best_val_acc = val_acc
-            best_train_loss = avg_train_loss
-            epochs_without_improvement = 0
-
-            log_0(f'New best validation loss: {best_val_loss:.4f}  Validation accuracy: {best_val_acc:.2f}%')
-
-            client_state = {
-                'train_version': 1,
-                'avg_train_loss': avg_train_loss,
-                'avg_val_loss': avg_val_loss,
-                'val_acc': val_acc,
-                'epoch': epoch,
-                'fp16': fp16,
-            }
-            model_engine.save_checkpoint(save_dir=args.output_dir, client_state=client_state)
-
-            if is_main_process():
-                save_deepspeed_model_engine(model_engine, fp16, args)
-                log_0(f"Wrote model to {args.output_model} with val_loss={best_val_loss:.4f}, val_acc={best_val_acc:.2f}%")
-        else:
-            epochs_without_improvement += 1
-
-            # Early stopping condition
-            if epochs_without_improvement >= args.patience:
-                log_0(f"Early stopping at epoch {epoch} due to epochs_without_improvement={epochs_without_improvement}")
-                break
+                wandb.log({"avg_train_loss": avg_train_loss, "epoch": epoch, "wallclock_time": epoch_time, "lr": lr})
 
     if is_main_process():
         t1 = time.time()
         dt = t1 - t0
 
-        log_0(f'Training complete after {dt} seconds.  Best model was written to {args.output_model}  Final best validation loss: {best_val_loss}, best validation accuracy: {best_val_acc:.2f}%')
+        log_0(f'Training complete after {dt} seconds.  Best model was written to {args.output_model}')
 
         if args.wandb:
-            wandb.log({"best_val_loss": best_val_loss, "best_val_acc": best_val_acc})
             wandb.finish()
 
 def read_yaml_file(file_path):
@@ -316,6 +275,8 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.1, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
+    parser.add_argument("--microbatch", type=int, default=8, help="Microbatch size for each GPU")
+    parser.add_argument("--context", type=int, default=8192, help="Context size for each microbatch")
 
     # Training duration
     parser.add_argument("--max-epochs", type=int, default=300, help="Maximum epochs to train")
@@ -335,6 +296,10 @@ if __name__ == "__main__":
 
     args_path = os.path.join(args.dataset_dir, "args.yml")
     shard_config = read_yaml_file(args_path)
+
+    local_ranks = torch.cuda.device_count()
+    if local_ranks != shard_config["rank_count"]:
+        raise RuntimeError(f"Number of GPUs ({local_ranks}) does not rank_count from shard config ({shard_config['rank_count']})")
 
     print(f"Shard config: {shard_config}")
 
