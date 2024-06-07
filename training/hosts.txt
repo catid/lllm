@@ -1,0 +1,7 @@
+# EDIT THIS
+# Format is <hostname> <rank count>
+
+gpu3.lan 2
+gpu4.lan 2
+gpu5.lan 2
+gpu6.lan 2

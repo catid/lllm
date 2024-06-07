@@ -1,7 +1,0 @@
-# Make sure the local machine is first so that rank=0 prints locally
-gpu4.lan slots=2
-gpu1.lan slots=3
-gpu2.lan slots=3
-gpu3.lan slots=2
-gpu5.lan slots=2
-gpu6.lan slots=2

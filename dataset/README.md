@@ -48,3 +48,5 @@ sudo apt install pdsh parallel
 ```
 
 If you hit CTRL+C it will abort the remote jobs.
+
+After this finishes (takes about ~2.5 hours for 4 machines), you'll have a directory called `~/dataset_shard` with the sharded dataset on each node.  Now you're ready to start training language models.
