@@ -342,7 +342,7 @@ if __name__ == "__main__":
         os.makedirs(args.output_dir)
 
     if args.verify_dataset:
-        print("Verifying dataset... (should take about a minute)")
+        print("Verifying dataset... (should take about one minute per 0.4T tokens using an SSD)")
         is_valid = DataVerifier.verify(args.dataset_dir)
 
         if not is_valid:
