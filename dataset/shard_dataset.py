@@ -89,7 +89,7 @@ def tokenizer_worker(queue, output_queue):
             output_queue.put(None)
             break
 
-        tokenized_text = tokenizer.encode(text)
+        tokenized_text = tokenizer.encode(text, disallowed_special=())
         output_queue.put(tokenized_text)
 
 def main():
