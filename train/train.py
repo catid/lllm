@@ -155,8 +155,7 @@ def main(args):
         verbose="false"
     )
 
-    cfg=LatentLanguageConfig()
-
+    cfg = LatentLanguageConfig()
     model = LatentLanguage(cfg)
 
     optimizer = schedulefree.AdamWScheduleFree(
