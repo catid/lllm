@@ -65,7 +65,7 @@ def main():
     parser.add_argument('--hosts-file', type=str, default="hosts.txt", help="Path to the hosts file (default: hosts.txt).")
     parser.add_argument('--dataset-dir', type=str, default="/mnt/Media/datasets/fineweb-edu", help="Dataset location.")
     parser.add_argument('--output-dir', type=str, default="~/dataset_shard", help="Output shard directory.")
-    parser.add_argument('--source-dir', type=str, default="~/llm/dataset", help="Source directory.")
+    parser.add_argument('--source-dir', type=str, default="~/lllm/dataset", help="Source directory.")
     parser.add_argument('--conda-env', type=str, default="lllm", help="Conda environment name.")
     parser.add_argument('--conda-dir', type=str, default="~/mambaforge", help="Conda environment directory.")
     parser.add_argument('--username', type=str, default=None, help="SSH username.")
