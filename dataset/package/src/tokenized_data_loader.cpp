@@ -21,6 +21,12 @@ bool GlobalIndexYaml::Read(const std::string& data_folder_path) {
 
     MappedFileReader index_reader;
     if (!index_reader.Open(index_file_path)) {
+        LOG_ERROR() << "Failed to open index file at " << index_file_path;
+        return false;
+    }
+
+    if (index_reader.GetSize() == 0) {
+        LOG_ERROR() << "Index file is empty";
         return false;
     }
 
@@ -31,6 +37,7 @@ bool GlobalIndexYaml::Read(const std::string& data_folder_path) {
     if (data_files.invalid() || index_files.invalid() ||
         !data_files.is_seq() || !index_files.is_seq() ||
         data_files.num_children() != index_files.num_children()) {
+        LOG_ERROR() << "Invalid index file format";
         return false;
     }
 
@@ -71,6 +78,11 @@ bool DataShardContext::Open(
     }
 
     uint64_t index_file_bytes = index_reader->GetSize();
+    if (index_file_bytes < 8) {
+        LOG_INFO() << "Index file is too small at " << index_file_path;
+        return false;
+    }
+
     uint64_t num_spans = (index_file_bytes - 8) / sizeof(uint32_t) - 1;
     if (num_spans > UINT32_MAX) {
         LOG_INFO() << "Too many regions in index file at " << index_file_path;
@@ -163,6 +175,10 @@ bool TokenizedDataLoader::Start(
 
     if (rank_ >= local_ranks_) {
         LOG_ERROR() << "Rank " << rank_ << " is out of range (local_ranks=" << local_ranks_ << ")";
+        return false;
+    }
+    if (local_ranks <= 0) {
+        LOG_ERROR() << "Local ranks must be greater than 0";
         return false;
     }
 
@@ -306,6 +322,8 @@ void TokenizedDataLoader::Prefill() {
 
     std::vector<ReadRequest> requests;
 
+    int continuations = 0;
+
     for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index)
     {
         auto& decompressor = decompressors_[batch_index];
@@ -314,6 +332,7 @@ void TokenizedDataLoader::Prefill() {
 
         // If there is still data to read, do not prefill this row
         if (used > 0 && used < decompressed_words) {
+            ++continuations;
             continue;
         }
 
@@ -330,7 +349,9 @@ void TokenizedDataLoader::Prefill() {
     }
 
     if (requests.empty()) {
-        LOG_INFO() << "Prepared dataset files contain no more data";
+        if (continuations == 0) {
+            LOG_INFO() << "Prepared dataset files contain no more data";
+        }
         prefill_complete_ = true;
         return;
     }
@@ -343,24 +364,33 @@ void TokenizedDataLoader::Prefill() {
         pool_.QueueTask([this, request](int /*worker_index*/) {
             if (request.shard_index >= shards_.size()) {
                 LOG_ERROR() << "Internal error: Requested shard index " << request.shard_index << " is out of range";
+                worker_error_ = true;
                 return;
             }
             if (request.batch_index >= decompressors_.size()) {
                 LOG_ERROR() << "Internal error: Requested batch index " << request.batch_index << " is out of range";
+                worker_error_ = true;
                 return;
             }
 
             // Read offsets from mmap index file
-            uint32_t bytes = 0;
+            uint32_t cbytes = 0;
             uint64_t offset = shards_[request.shard_index]->GetSpan(
                 request.shard_span_index,
-                bytes);
+                cbytes);
 
-            shards_[request.shard_index]->DataFile->Read(offset, bytes,
-                [this, request](uint8_t* data, uint32_t bytes)
+            if (cbytes == 0) {
+                LOG_ERROR() << "Invalid span data for shard=" << request.shard_index << " index=" << request.shard_span_index;
+                worker_error_ = true;
+                return;
+            }
+
+            shards_[request.shard_index]->DataFile->Read(offset, cbytes,
+                [this, cbytes, offset, request](uint8_t* data, uint32_t bytes)
             {
                 if (request.batch_index >= decompressors_.size()) {
                     LOG_ERROR() << "Internal error: Requested batch index " << request.batch_index << " is out of range";
+                    worker_error_ = true;
                     return;
                 }
 
@@ -373,6 +403,8 @@ void TokenizedDataLoader::Prefill() {
                 }
 
                 total_decompressed_bytes_ += decompressor->Result.size();
+
+                //LOG_INFO() << "Decompressed " << decompressor->Result.size() << " bytes from " << cbytes << " for shard=" << request.shard_index << " index=" << request.shard_span_index << " offset=" << offset;
 
                 uint32_t remaining = --prefill_inflight_;
                 if (remaining == 0) {

@@ -49,7 +49,7 @@ if __name__ == "__main__":
         if batch.shape[0] != args.batch:
             print(f"Batch: {batch.shape} is_cont={is_cont}")
 
-        print(f"Batch[0] = {batch[0][0]}")
+        #print(f"Batch[0] = {batch[0][0]}")
 
         total_microbatches += 1
 
