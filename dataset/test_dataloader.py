@@ -41,6 +41,7 @@ def main(args, shard_config):
             print(f"Batch: {batch.shape} is_cont={is_cont}")
 
         #print(f"Batch[0] = {batch[0][0]}")
+        print(f"Batch = {batch}")
 
         total_microbatches += 1
 

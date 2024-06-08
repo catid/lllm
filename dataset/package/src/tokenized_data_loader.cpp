@@ -456,7 +456,7 @@ bool TokenizedDataLoader::WaitUntilDataReady() {
 bool TokenizedDataLoader::GetTokenArray(
     uint32_t* micro_batch_out,
     uint32_t* max_tokens_out,
-    uint32_t* output_batch,
+    int32_t* output_batch,
     uint8_t* is_continuation)
 {
     if (!WaitUntilDataReady()) {
@@ -493,10 +493,12 @@ bool TokenizedDataLoader::GetTokenArray(
         output_batch += copy_words;
         max_token_count = std::max(max_token_count, copy_words);
 
-        const uint32_t pad_bytes = context_size_ - copy_words;
-        if (pad_bytes > 0) {
-            memset(output_batch, kPaddingToken, pad_bytes * sizeof(uint32_t));
-            output_batch += pad_bytes;
+        const uint32_t pad_words = context_size_ - copy_words;
+        if (pad_words > 0) {
+            for (uint32_t i = 0; i < pad_words; ++i) {
+                output_batch[i] = kPaddingToken;
+            }
+            output_batch += pad_words;
         }
 
         // Signal continuation for this row
@@ -510,8 +512,9 @@ bool TokenizedDataLoader::GetTokenArray(
     // Pad the remaining unwritten rows with padding tokens
     if (num_rows < micro_batch_size_) {
         const uint32_t pad_rows = micro_batch_size_ - num_rows;
-        assert(kPaddingToken == 0);
-        memset(output_batch, 0, pad_rows * context_size_ * sizeof(uint32_t));
+        for (uint32_t i = 0; i < context_size_; ++i) {
+            output_batch[i] = kPaddingToken;
+        }
         memset(is_continuation, 0, pad_rows);
     }
 

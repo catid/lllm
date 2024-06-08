@@ -13,4 +13,6 @@
 
 static const int kCompressorByteStride = 4; // 32-bit tokens
 
-static const uint32_t kPaddingToken = 0; // <PAD>
+// Often times models are not trained with a padding token (OpenAI for example).
+// We use a special padding token to represent padding after the last token.
+static const int32_t kPaddingToken = -1; // <PAD>

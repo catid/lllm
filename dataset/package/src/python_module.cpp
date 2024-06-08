@@ -33,7 +33,7 @@ void data_loader_start_epoch(void* data_loader, uint64_t seed0, uint64_t seed1, 
     loader->StartEpoch(seed0, seed1, micro_batch_size, context_size);
 }
 
-bool data_loader_get_micro_batch(void* data_loader, uint32_t* micro_batch_size, uint32_t* num_tokens, uint32_t* output_batch, uint8_t* is_continuation) {
+bool data_loader_get_micro_batch(void* data_loader, uint32_t* micro_batch_size, uint32_t* num_tokens, int32_t* output_batch, uint8_t* is_continuation) {
     TokenizedDataLoader* loader = static_cast<TokenizedDataLoader*>(data_loader);
     return loader->GetTokenArray(micro_batch_size, num_tokens, output_batch, is_continuation);
 }

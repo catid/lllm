@@ -35,7 +35,7 @@ bool test_data_loader() {
     for (;;) {
         uint32_t micro_batch_size;
         uint32_t num_tokens;
-        uint32_t output_batch[k_micro_batch_size * k_context_size];
+        int32_t output_batch[k_micro_batch_size * k_context_size];
         uint8_t is_continuation[k_micro_batch_size];
 
         uint64_t t0 = GetNsec();

@@ -85,8 +85,10 @@ def train_one_step(optimizer, model_engine, dataloader):
     labels = input_ids[..., :-1].contiguous()
     targets = input_ids[..., 1:].contiguous()
 
+    log_all(f"targets={targets} labels={labels}")
+
     _, loss = model_engine(labels, targets)
-    tokens_trained = torch.count_nonzero(targets).item()
+    tokens_trained = torch.sum(targets != -1).item()
 
     optimizer.zero_grad()
     loss.backward()
