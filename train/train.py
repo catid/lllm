@@ -85,8 +85,6 @@ def train_one_step(optimizer, model_engine, dataloader):
     labels = input_ids[..., :-1].contiguous()
     targets = input_ids[..., 1:].contiguous()
 
-    log_all(f"targets={targets} labels={labels}")
-
     _, loss = model_engine(labels, targets)
     tokens_trained = torch.sum(targets != -1).item()
 
@@ -176,7 +174,7 @@ def main(args, shard_config):
 
     log_all(f"Node rank={rank}, num_shards={num_gpus}, shard_id={shard_id}, train_batch_size={train_batch_size}, data_loader_batch_size={data_loader_batch_size}, steps_per_print={steps_per_print}")  
 
-    seed = synchronize_seed(rank, shard_id)
+    seed = synchronize_seed(rank, shard_id, args.seed)
 
     # Weights & Biases
     if args.wandb and is_main_process():
@@ -227,7 +225,7 @@ def main(args, shard_config):
                 break
 
             end_time = time.time()
-            epoch_time = end_time - start_time
+            step_time = end_time - start_time
 
             # Sync variables between ranks
             avg_train_loss = torch.tensor(train_loss).cuda(rank)
@@ -236,9 +234,10 @@ def main(args, shard_config):
             comm.all_reduce(tensor=sum_tokens, op=comm.ReduceOp.SUM)
             avg_train_loss = avg_train_loss.item()
             tokens += sum_tokens.item()
+            tokens_per_second = sum_tokens.item() / step_time
 
             if is_main_process():
-                log_0(f"Step complete - TrainLoss={avg_train_loss:.4f} Time={epoch_time:.2f} sec Tokens={tokens/1000000.0}M")
+                log_0(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec Tokens={tokens/1000000.0}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
 
             step += 1
 
@@ -247,7 +246,7 @@ def main(args, shard_config):
                     wandb.log({
                         "avg_train_loss": avg_train_loss,
                         "epoch": epoch,
-                        "wallclock_time": epoch_time,
+                        "wallclock_time": step_time,
                         "lr": optimizer.param_groups[0]['lr'],
                         "tokens": tokens,
                         "step": step
@@ -290,7 +289,7 @@ if __name__ == "__main__":
     parser.add_argument("--verify-dataset", action="store_true", help="Verify the dataset before training")
 
     # Misc
-    parser.add_argument("--seed", type=int, default=-1, help="Seed for random numbers.  Set to -1 to pick a fully random seed")
+    parser.add_argument("--seed", type=int, default=0, help="Seed for random numbers.  Set to -1 to pick a fully random seed")
     parser.add_argument("--compile", action="store_true", help="Enable torch.compile")
     parser.add_argument("--fp32", action='store_true', help="Enable fp32 training (fp16 default)")
 
