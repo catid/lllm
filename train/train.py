@@ -1,4 +1,3 @@
-# Set the environment variables
 import os
 
 from model.model import LatentLanguage, LatentLanguageConfig
@@ -22,7 +21,6 @@ from deepspeed.runtime.config import DeepSpeedConfig
 from cpp_dataloader import DataLoader, DataVerifier
 #from mora import MoRALayer, merge_mora_weights, replace_linear_with_mora
 
-#from sophia import SophiaG
 import schedulefree
 
 # Enable cuDNN benchmarking to improve online performance
@@ -74,7 +72,7 @@ def delete_folder_contents(folder_path):
         shutil.rmtree(folder_path)
     os.makedirs(folder_path)
 
-def train_one_step(optimizer, criterion, model_engine, dataloader):
+def train_one_step(optimizer, model_engine, dataloader):
     model_engine.train()
 
     batch, is_cont = dataloader.get_micro_batch()
@@ -183,9 +181,6 @@ def main(args, shard_config):
         wandb.init(project=args.project, name=args.name, config=args)
         wandb.run.log_code = False
 
-    criterion = nn.CrossEntropyLoss()
-    criterion.cuda(rank)
-
     if args.compile:
         forward_and_loss = torch.compile(forward_and_loss, dynamic=True, fullgraph=False)
 
@@ -206,6 +201,8 @@ def main(args, shard_config):
 
     # DataLoader
     dataloader = DataLoader(args.dataset_dir, rank=rank, local_ranks=shard_config["rank_count"])
+    if not dataloader:
+        raise RuntimeError("DataLoader failed to initialize")
 
     for epoch in range(start_epoch, args.max_epochs):
         # This seed is synchronized between ranks so they do not reuse the same data
@@ -216,7 +213,7 @@ def main(args, shard_config):
 
             start_time = time.time()
 
-            train_loss = train_one_step(optimizer, criterion, model_engine, dataloader)
+            train_loss = train_one_step(optimizer, model_engine, dataloader)
 
             if train_loss is None:
                 break
@@ -276,7 +273,7 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str, default="my_project", help="Collection of experiments on wandb")
 
     # Hyperparameters
-    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate for training")
+    parser.add_argument("--lr", type=float, default=0.003, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
     parser.add_argument("--context", type=int, default=1024, help="Context size for each microbatch")
