@@ -642,11 +642,14 @@ bool VerifyDataset(const std::string& data_folder_path)
 
     if (m_early_stop_flag) {
         LOG_INFO() << "Early stopping due to SIGINT";
+        signal(SIGINT, SIG_DFL);
         return true;
     }
 
     pool.WaitForTasks();
     pool.Stop();
+
+    signal(SIGINT, SIG_DFL);
 
     if (data_error) {
         LOG_INFO() << "Data verification failed";
