@@ -217,7 +217,7 @@ def main(args, shard_config):
         while True:
             start_time = time.time()
 
-            train_loss, tokens = train_one_step(optimizer, model_engine, dataloader)
+            train_loss, train_tokens = train_one_step(optimizer, model_engine, dataloader)
 
             if train_loss is None:
                 log_all(f"Epoch {epoch} data exhausted on rank {rank} at step={step}")
@@ -228,11 +228,11 @@ def main(args, shard_config):
 
             # Sync variables between ranks
             avg_train_loss = torch.tensor(train_loss).cuda(rank)
-            sum_tokens = torch.tensor(tokens).cuda(rank)
+            sum_tokens = torch.tensor(train_tokens).cuda(rank)
             comm.all_reduce(tensor=avg_train_loss, op=comm.ReduceOp.AVG)
             comm.all_reduce(tensor=sum_tokens, op=comm.ReduceOp.SUM)
             avg_train_loss = avg_train_loss.item()
-            tokens = sum_tokens.item()
+            tokens += sum_tokens.item()
 
             if is_main_process():
                 log_0(f"Step complete - TrainLoss={avg_train_loss:.4f} Time={epoch_time:.2f} sec Tokens={tokens/1000000.0}M")
