@@ -312,7 +312,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.004, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
-    parser.add_argument("--context", type=int, default=1024, help="Context size for each microbatch")
+    parser.add_argument("--context", type=int, default=4096, help="Context size for each microbatch")
 
     # Checkpointing
     parser.add_argument("--checkpoint-interval", type=int, default=1000, help="Steps between checkpoints")
