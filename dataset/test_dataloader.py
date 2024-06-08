@@ -44,6 +44,9 @@ def main(args, shard_config):
 
         total_microbatches += 1
 
+        if total_microbatches % 5000 == 0:
+            print(f"Reading epoch data: {total_microbatches} microbatches...")
+
     t1 = time.time()
     dt = t1 - t0
     print(f"Epoch complete in {dt:.2f} seconds: {total_microbatches} microbatches")
