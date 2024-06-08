@@ -1,4 +1,13 @@
+/*
+    Preparation for training data.
+*/
+
 #pragma once
+
+#include "dataloader.hpp"
+#include "worker_pool.hpp"
+#include "compressor.hpp"
+#include "tools.hpp"
 
 #include <cstdint>
 #include <string>
@@ -7,33 +16,36 @@
 #include <memory>
 #include <functional>
 
-#include "dataloader.hpp"
-#include "worker_pool.hpp"
-#include "compressor.hpp"
-#include "tools.hpp"
-
 //------------------------------------------------------------------------------
 // Constants
 
-// Limit size so that it is unlikely we will go over a 32-bit address space
-static const uint64_t kMaxFileSize = 0xffffffff - 1000000;
+// Limit size to 2GB to avoid overflowing signed 32-bit integers
+static const uint64_t kMaxFileSize = 0x7fffffff - 1000000;
 
 
 //------------------------------------------------------------------------------
 // CompressorContext
 
-using OnFileStart = std::function<void(std::string& data_file_path, std::string& index_file_path)>;
+using OnFileStart = std::function<void(
+    std::string& data_file_path,
+    std::string& index_file_path)>;
 
 class CompressorContext {
 public:
-    bool WriteTokenizedText(
-        const uint32_t* tokenized_text,
-        uint32_t text_length,
+    CompressorContext(uint32_t token_bytes) {
+        token_bytes_ = token_bytes;
+    }
+
+    bool WriteTokens(
+        const void* tokens,
+        uint32_t token_count,
         OnFileStart on_file_start);
 
     bool FinishCurrentFile();
 
 protected:
+    uint32_t token_bytes_ = 0;
+
     std::string data_file_path_;
     std::ofstream current_file_;
     uint64_t current_file_hash_ = 0;
@@ -43,7 +55,7 @@ protected:
     uint64_t current_index_hash_ = 0;
     uint64_t current_file_bytes_ = 0;
 
-    Compressor compressor;
+    Compressor compressor_;
 };
 
 
@@ -56,12 +68,17 @@ public:
         Stop();
     }
 
-    void Start(const std::string& data_folder_path);
-    bool WriteTokenizedText(const uint32_t* tokenized_text, uint32_t text_length);
+    void Start(
+        const std::string& data_folder_path,
+        uint32_t token_bytes);
+    bool WriteTokens(
+        const void* tokens,
+        uint32_t token_count);
     bool Stop();
 
 private:
     std::string data_folder_path_ = ".";
+    uint32_t token_bytes_ = 0;
 
     std::vector<std::shared_ptr<CompressorContext>> contexts_;
     WorkerPool pool_;

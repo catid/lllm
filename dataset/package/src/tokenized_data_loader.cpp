@@ -34,12 +34,19 @@ bool GlobalIndexYaml::Read(const std::string& data_folder_path) {
     ryml::Tree tree = ryml::parse_in_arena(yaml_substr);
     ryml::ConstNodeRef data_files = tree["data_files"];
     ryml::ConstNodeRef index_files = tree["index_files"];
+    ryml::ConstNodeRef version = tree["version"];
+    ryml::ConstNodeRef token_bytes = tree["token_bytes"];
     if (data_files.invalid() || index_files.invalid() ||
         !data_files.is_seq() || !index_files.is_seq() ||
-        data_files.num_children() != index_files.num_children()) {
+        data_files.num_children() != index_files.num_children() ||
+        version.invalid() || token_bytes.invalid() ||
+        !version.is_keyval() || !token_bytes.is_keyval()) {
         LOG_ERROR() << "Invalid index file format";
         return false;
     }
+
+    ryml::from_chars(version.val(), &version_);
+    ryml::from_chars(token_bytes.val(), &token_bytes_);
 
     const int num_files = (int)data_files.num_children();
     for (int i = 0; i < num_files; ++i) {
@@ -63,8 +70,11 @@ bool GlobalIndexYaml::Read(const std::string& data_folder_path) {
 
 bool DataShardContext::Open(
     const std::string& data_file_path,
-    const std::string& index_file_path)
+    const std::string& index_file_path,
+    uint32_t token_bytes)
 {
+    token_bytes_ = token_bytes;
+
     std::shared_ptr<AsyncUringReader> data_reader = std::make_shared<AsyncUringReader>();
     if (!data_reader->Open(data_file_path)) {
         LOG_INFO() << "Failed to open data file at " << data_file_path;
@@ -83,9 +93,27 @@ bool DataShardContext::Open(
         return false;
     }
 
-    uint64_t num_spans = (index_file_bytes - 8) / sizeof(uint32_t) - 1;
+    uint64_t num_spans = (index_file_bytes - kIndexEndBytes) / kIndexRecordBytes;
     if (num_spans > UINT32_MAX) {
         LOG_INFO() << "Too many regions in index file at " << index_file_path;
+        return false;
+    }
+
+    const uint8_t* span_data = IndexFile->GetData();
+    const uint32_t data_file_bytes = read_uint32_le(span_data + index_file_bytes - kIndexEndBytes);
+    const uint32_t index_version = span_data[index_file_bytes - kIndexEndBytes + 4];
+    const uint32_t index_token_bytes = span_data[index_file_bytes - kIndexEndBytes + 5];
+
+    if (data_file_bytes != data_reader->GetSize()) {
+        LOG_ERROR() << "Data file size mismatch: expected " << data_file_bytes << ", found " << data_reader->GetSize();
+        return false;
+    }
+    if (index_version != DATALOADER_VERSION) {
+        LOG_ERROR() << "Index file version mismatch: expected " << DATALOADER_VERSION << ", found " << index_version;
+        return false;
+    }
+    if (token_bytes != index_token_bytes) {
+        LOG_ERROR() << "Index file token_bytes mismatch: expected " << token_bytes << ", found " << index_token_bytes;
         return false;
     }
 
@@ -134,7 +162,8 @@ void DataShardContext::ShuffleIndices(
 
 uint64_t DataShardContext::GetSpan(
     uint32_t span_index,
-    uint32_t& bytes_out)
+    uint32_t& cbytes_out,
+    uint32_t& original_bytes_out)
 {
     if (span_index >= NumSpans) {
         LOG_ERROR() << "Internal error: Requested span index " << span_index << " is out of range";
@@ -148,16 +177,18 @@ uint64_t DataShardContext::GetSpan(
         return 0;
     }
 
-    const uint8_t* span_data = IndexFile->GetData() + index * 4;
+    const uint8_t* span_data = IndexFile->GetData() + index * kIndexRecordBytes;
     const uint32_t start = read_uint32_le(span_data);
-    const uint32_t end = read_uint32_le(span_data + 4);
+    const uint32_t original_bytes = read_uint32_le(span_data + 4);
+    const uint32_t end = read_uint32_le(span_data + kIndexRecordBytes);
 
     if (start >= end) {
         LOG_ERROR() << "Internal error: Span index " << span_index << " has invalid start=" << start << " end=" << end;
         return 0;
     }
 
-    bytes_out = end - start;
+    cbytes_out = end - start;
+    original_bytes_out = original_bytes;
     return start;
 }
 
@@ -190,6 +221,13 @@ bool TokenizedDataLoader::Start(
         return false;
     }
 
+    if (global_index_yaml_->version_ != DATALOADER_VERSION) {
+        LOG_ERROR() << "Global index file version mismatch: expected " << DATALOADER_VERSION << ", found " << global_index_yaml_->version_;
+        return false;
+    }
+
+    token_bytes_ = static_cast<uint32_t>( global_index_yaml_->token_bytes_ );
+
     pool_.Start();
 
     // These are set during StartEpoch()
@@ -215,7 +253,7 @@ bool TokenizedDataLoader::Start(
             if (worker_error_) {
                 return;
             }
-            if (!shard->Open(data_file_path, index_file_path)) {
+            if (!shard->Open(data_file_path, index_file_path, token_bytes_)) {
                 LOG_INFO() << "Failed to open data file at " << data_file_path;
                 worker_error_ = true;
             }
@@ -375,9 +413,11 @@ void TokenizedDataLoader::Prefill() {
 
             // Read offsets from mmap index file
             uint32_t cbytes = 0;
+            uint32_t original_bytes = 0;
             uint64_t offset = shards_[request.shard_index]->GetSpan(
                 request.shard_span_index,
-                cbytes);
+                cbytes,
+                original_bytes);
 
             if (cbytes == 0) {
                 LOG_ERROR() << "Invalid span data for shard=" << request.shard_index << " index=" << request.shard_span_index;
@@ -386,7 +426,9 @@ void TokenizedDataLoader::Prefill() {
             }
 
             shards_[request.shard_index]->DataFile->Read(offset, cbytes,
-                [this, cbytes, offset, request](uint8_t* data, uint32_t bytes)
+                [this, cbytes, original_bytes, offset, request](
+                    uint8_t* compressed_data,
+                    uint32_t compressed_bytes)
             {
                 if (request.batch_index >= decompressors_.size()) {
                     LOG_ERROR() << "Internal error: Requested batch index " << request.batch_index << " is out of range";
@@ -394,10 +436,15 @@ void TokenizedDataLoader::Prefill() {
                     return;
                 }
 
-                total_disk_read_ += bytes;
+                total_disk_read_ += compressed_bytes;
 
                 auto& decompressor = decompressors_[request.batch_index];
-                if (!decompressor->Decompress(data, bytes, kCompressorByteStride)) {
+                bool r = decompressor->Decompress(
+                    compressed_data,
+                    compressed_bytes,
+                    original_bytes,
+                    token_bytes_);
+                if (!r) {
                     LOG_ERROR() << "Failed to decompress data for shard=" << request.shard_index << " index=" << request.shard_span_index;
                     worker_error_ = true;
                 }
@@ -536,7 +583,8 @@ bool TokenizedDataLoader::GetTokenArray(
 
 bool verify_files(
     const std::string& index_file_path,
-    const std::string& data_file_path)
+    const std::string& data_file_path,
+    uint32_t token_bytes)
 {
     MappedFileReader index_reader;
     if (!index_reader.Open(index_file_path)) {
@@ -546,9 +594,21 @@ bool verify_files(
 
     const char* index_data = reinterpret_cast<const char*>(index_reader.GetData());
     size_t index_size = index_reader.GetSize();
+    uint64_t index_data_size = read_uint32_le(index_data + index_size - 14);
+    uint32_t index_version = static_cast<uint8_t>( index_data[index_size - 10] );
+    uint32_t index_token_bytes = static_cast<uint8_t>( index_data[index_size - 9] );
     uint64_t index_hash = read_uint64_le(index_data + index_size - 8);
-    index_hash ^= CityHash64(index_data, sizeof(uint32_t));
-    size_t word_count = (index_size - 8) / sizeof(uint32_t);
+    index_hash ^= CityHash64(index_data, kIndexRecordBytes);
+    size_t record_count = (index_size - 8) / kIndexRecordBytes;
+
+    if (DATALOADER_VERSION != index_version) {
+        LOG_ERROR() << "Index file version mismatch: expected " << DATALOADER_VERSION << ", found " << index_version;
+        return false;
+    }
+    if (token_bytes != index_token_bytes) {
+        LOG_ERROR() << "Index file token_bytes mismatch: expected " << token_bytes << ", found " << index_token_bytes;
+        return false;
+    }
 
     MappedFileReader data_reader;
     if (!data_reader.Open(data_file_path)) {
@@ -558,21 +618,37 @@ bool verify_files(
 
     const char* data_data = reinterpret_cast<const char*>(data_reader.GetData());
     size_t data_size = data_reader.GetSize();
+    uint32_t data_version = static_cast<uint8_t>( data_data[data_size - 10] );
+    uint32_t data_token_bytes = static_cast<uint8_t>( data_data[data_size - 9] );
     uint64_t data_hash = read_uint64_le(data_data + data_size - 8);
 
-    for (size_t i = 1; i < word_count; ++i) {
-        const char* current_offset_buffer = index_data + i * sizeof(uint32_t);
-        uint32_t start = read_uint32_le(current_offset_buffer - 4);
-        uint32_t end = read_uint32_le(current_offset_buffer);
+    if (DATALOADER_VERSION != data_version) {
+        LOG_ERROR() << "Data file version mismatch: expected " << DATALOADER_VERSION << ", found " << data_version;
+        return false;
+    }
+    if (token_bytes != data_token_bytes) {
+        LOG_ERROR() << "Data file token_bytes mismatch: expected " << token_bytes << ", found " << data_token_bytes;
+        return false;
+    }
+    if (index_data_size != data_size) {
+        LOG_ERROR() << "Data file size mismatch: expected " << index_data_size << ", found " << data_size;
+        return false;
+    }
+
+    for (size_t i = 1; i < record_count; ++i) {
+        const char* index_ptr = index_data + i * kIndexRecordBytes;
+        uint32_t start = read_uint32_le(index_ptr - kIndexRecordBytes);
+        uint32_t end = read_uint32_le(index_ptr);
+        //uint32_t original_bytes = read_uint32_le(index_ptr + 4);
         if (end <= start) {
-            LOG_INFO() << "Invalid offset: " << current_offset_buffer;
+            LOG_INFO() << "Offset end <= start: Entry " << i;
             return false;
         }
-        uint32_t bytes = end - start;
 
-        index_hash ^= CityHash64(current_offset_buffer, sizeof(uint32_t));
+        index_hash ^= CityHash64(index_ptr, kIndexRecordBytes);
 
-        data_hash ^= CityHash64(data_data + start, bytes);
+        uint32_t cbytes = end - start;
+        data_hash ^= CityHash64(data_data + start, cbytes);
     }
 
     if (index_hash != 0) {
@@ -617,15 +693,21 @@ bool VerifyDataset(const std::string& data_folder_path)
         const std::string& data_file_path = global_index_yaml.data_files_[i];
         const std::string& index_file_path = global_index_yaml.index_files_[i];
 
+        const uint32_t token_bytes = global_index_yaml.token_bytes_;
+        if (global_index_yaml.version_ != DATALOADER_VERSION) {
+            LOG_ERROR() << "Global index file version mismatch: expected " << DATALOADER_VERSION << ", found " << global_index_yaml.version_;
+            return false;
+        }
+
         const int max_active_tasks = 2;
-        pool.QueueTask([t0, &files_verified, num_files, &data_error, data_file_path, index_file_path](int /*worker_index*/) {
+        pool.QueueTask([t0, token_bytes, &files_verified, num_files, &data_error, data_file_path, index_file_path](int /*worker_index*/) {
             if (data_error) {
                 return;
             }
             if (m_early_stop_flag) {
                 return;
             }
-            if (!verify_files(index_file_path, data_file_path)) {
+            if (!verify_files(index_file_path, data_file_path, token_bytes)) {
                 data_error = true;
             }
             const int count = files_verified++;

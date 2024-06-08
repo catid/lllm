@@ -84,7 +84,7 @@ class Block(nn.Module):
 class LatentLanguageConfig:
     n_vocab: int = 0 # Set to tokenizer n_vocab
 
-    n_embd: int = 384 * 2
+    n_embd: int = 768
     bias: bool = False
     dropout: float = 0.2
     n_head: int = 12

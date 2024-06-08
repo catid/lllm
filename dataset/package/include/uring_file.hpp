@@ -94,6 +94,8 @@ public:
         int queue_depth = 8);
     void Close();
 
+    uint64_t GetSize() const { return EndCache.FileBytes; }
+
     // Returns false if the reader is busy.
     // This can invoke the callback during the Read() call if it is in cache.
     bool Read(
@@ -104,10 +106,10 @@ public:
     bool IsBusy() const { return InflightCount > 0; }
 
 private:
-    struct io_uring ring{};
-    bool ring_initialized = false;
+    struct io_uring ring_{};
+    bool ring_initialized_ = false;
 
-    int fd = -1;
+    int fd_ = -1;
     int block_size_ = 0;
     int read_align_bytes_ = 0;
 

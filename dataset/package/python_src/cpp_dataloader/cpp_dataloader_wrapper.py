@@ -38,7 +38,7 @@ lib.data_loader_get_micro_batch.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctyp
 lib.data_loader_get_micro_batch.restype = ctypes.c_bool
 
 # Data Preparation
-lib.data_prep_create.argtypes = [ctypes.c_char_p]
+lib.data_prep_create.argtypes = [ctypes.c_char_p, ctypes.c_uint32]
 lib.data_prep_create.restype = ctypes.c_void_p
 
 lib.data_prep_destroy.argtypes = [ctypes.c_void_p]
@@ -85,17 +85,30 @@ class DataLoader:
         return output_array[:micro_batch_size.value, :num_tokens.value], is_continuation[:micro_batch_size.value]
 
 class DataPreparation:
-    def __init__(self, data_folder_path):
-        self.data_prep = lib.data_prep_create(data_folder_path.encode())
+    def __init__(self, data_folder_path, is_tokenized):
+        self.token_bytes = 4 if is_tokenized else 1
+        self.data_prep = lib.data_prep_create(data_folder_path.encode(), self.token_bytes)
         if not self.data_prep:
             raise RuntimeError("Failed to create data preparation")
 
     def __del__(self):
         self.destroy()
 
-    def write_tokenized_text(self, tokenized_text):
-        tokenized_text = np.asarray(tokenized_text, dtype=np.uint32)
-        success = lib.data_prep_write_tokenized_text(self.data_prep, tokenized_text.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)), len(tokenized_text))
+    def write_tokens(self, tokens):
+        tokens = np.asarray(tokens, dtype=np.uint32)
+        success = lib.data_prep_write_tokens(
+            self.data_prep,
+            tokens.ctypes.data_as(ctypes.POINTER(ctypes.c_uint32)),
+            len(tokens))
+        if not success:
+            raise RuntimeError("Failed to write tokenized text")
+
+    def write_bytes(self, byte_data):
+        byte_data = np.asarray(byte_data, dtype=np.uint8)
+        success = lib.data_prep_write_tokens(
+            self.data_prep,
+            byte_data.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
+            len(byte_data))
         if not success:
             raise RuntimeError("Failed to write tokenized text")
 

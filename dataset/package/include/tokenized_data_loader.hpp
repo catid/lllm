@@ -1,13 +1,4 @@
 /*
-    FIXME:
-    What happens if the next epoch is started and we still have prefill inflight?
-    How to prefetch the next epoch?
-    How to wait until data is available?
-*/
-
-#pragma once
-
-/*
     Possible data loading options:
 
     (1) Always run from first to last token in the dataset.
@@ -34,6 +25,8 @@
         This is an important optimization for training.
 */
 
+#pragma once
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -48,7 +41,6 @@
 #include "mapped_file.hpp"
 #include "uring_file.hpp"
 #include "worker_pool.hpp"
-
 
 //------------------------------------------------------------------------------
 // ReadRequest
@@ -66,6 +58,9 @@ struct ReadRequest {
 struct GlobalIndexYaml {
     bool Read(const std::string& data_folder_path);
 
+    int version_ = 0;
+    int token_bytes_ = 0;
+
     std::vector<std::string> data_files_, index_files_;
 };
 
@@ -80,7 +75,8 @@ struct DataShardContext {
 
     bool Open(
         const std::string& data_file_path,
-        const std::string& index_file_path);
+        const std::string& index_file_path,
+        uint32_t token_bytes);
     void Close();
 
     std::shared_ptr<AsyncUringReader> DataFile;
@@ -89,7 +85,10 @@ struct DataShardContext {
         uint64_t seed0, uint64_t seed1,
         uint32_t rank,
         uint32_t local_ranks);
-    uint64_t GetSpan(uint32_t span_index, uint32_t& bytes_out);
+    uint64_t GetSpan(
+        uint32_t span_index,
+        uint32_t& cbytes_out,
+        uint32_t& original_bytes_out);
 
     // The following are filled in by ShuffleIndices():
 
@@ -103,6 +102,8 @@ struct DataShardContext {
     uint32_t EpochNextSpan = 0;
 
 private:
+    uint32_t token_bytes_ = 0;
+
     // We shuffle each shard independently so that multiple threads can
     // work on the shuffling process in parallel.  Each shuffle is O(n).
     std::vector<uint32_t> ShuffledIndices;
@@ -154,6 +155,8 @@ public:
     bool WaitUntilDataReady();
 
     // Get the next microbatch of tokens.
+    // For byte models this will still be 32-bit tokens ranging from 0..255.
+    // In all cases, the value of -1 will be used for padding.
     bool GetTokenArray(
         uint32_t* micro_batch_size, // output: batch size
         uint32_t* num_tokens, // output: number of tokens in the batch
@@ -164,6 +167,7 @@ private:
     // The rank of the current process and the number of local ranks
     uint32_t rank_ = 0;
     uint32_t local_ranks_ = 1;
+    uint32_t token_bytes_ = 0;
 
     // Is Stop() called?
     std::atomic<bool> Terminated = ATOMIC_VAR_INIT(false);

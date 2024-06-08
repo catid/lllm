@@ -111,8 +111,8 @@ void Logger::ProcessLogQueue() {
 // TokenizedAllocator
 
 std::shared_ptr<TokenizedBuffer> TokenizedAllocator::Allocate(
-    const uint32_t* tokenized_text,
-    uint32_t text_length)
+    const void* data,
+    uint32_t bytes)
 {
     std::shared_ptr<TokenizedBuffer> buffer;
 
@@ -129,8 +129,8 @@ std::shared_ptr<TokenizedBuffer> TokenizedAllocator::Allocate(
         buffer = std::make_shared<TokenizedBuffer>();
     }
 
-    buffer->text.resize(text_length);
-    memcpy(buffer->text.data(), tokenized_text, text_length * sizeof(uint32_t));
+    buffer->Data.resize(bytes);
+    memcpy(buffer->Data.data(), data, bytes);
 
     return buffer;
 }

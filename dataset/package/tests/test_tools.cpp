@@ -13,8 +13,8 @@ bool testAllocateAndFree() {
     std::shared_ptr<TokenizedBuffer> buffer = allocator.Allocate(tokenized_text, text_length);
 
     // Verify the allocated buffer
-    if (buffer == nullptr || buffer->text.size() != text_length ||
-        memcmp(buffer->text.data(), tokenized_text, text_length * sizeof(uint32_t)) != 0) {
+    if (buffer == nullptr || buffer->Data.size() != text_length ||
+        memcmp(buffer->Data.data(), tokenized_text, text_length * sizeof(uint32_t)) != 0) {
         return false;
     }
 
@@ -51,9 +51,9 @@ bool testAllocateMultiple() {
 
     // Verify the allocated buffers
     if (buffer1 == nullptr || buffer2 == nullptr ||
-        buffer1->text.size() != text_length1 || buffer2->text.size() != text_length2 ||
-        memcmp(buffer1->text.data(), tokenized_text1, text_length1 * sizeof(uint32_t)) != 0 ||
-        memcmp(buffer2->text.data(), tokenized_text2, text_length2 * sizeof(uint32_t)) != 0) {
+        buffer1->Data.size() != text_length1 || buffer2->Data.size() != text_length2 ||
+        memcmp(buffer1->Data.data(), tokenized_text1, text_length1 * sizeof(uint32_t)) != 0 ||
+        memcmp(buffer2->Data.data(), tokenized_text2, text_length2 * sizeof(uint32_t)) != 0) {
         return false;
     }
 

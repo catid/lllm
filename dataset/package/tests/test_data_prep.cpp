@@ -21,7 +21,8 @@ bool testTokenizedDataPrep() {
 
     std::string data_folder_path = "test_data";
     TokenizedDataPrep data_prep;
-    data_prep.Start(data_folder_path);
+    const uint32_t token_bytes = 4;
+    data_prep.Start(data_folder_path, token_bytes);
 
     // Generate random tokenized text data
     std::random_device rd;
@@ -43,7 +44,7 @@ bool testTokenizedDataPrep() {
 
     // Write tokenized text data
     for (const auto& tokenized_text : tokenized_texts) {
-        if (!data_prep.WriteTokenizedText(tokenized_text.data(), tokenized_text.size())) {
+        if (!data_prep.WriteTokens(tokenized_text.data(), tokenized_text.size())) {
             LOG_ERROR() << "Failed to write tokenized text";
             return false;
         }

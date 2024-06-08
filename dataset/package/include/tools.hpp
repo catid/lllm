@@ -107,14 +107,14 @@ private:
 // TokenizedAllocator
 
 struct TokenizedBuffer {
-    std::vector<uint32_t> text;
+    std::vector<uint8_t> Data;
 };
 
 class TokenizedAllocator {
 public:
     std::shared_ptr<TokenizedBuffer> Allocate(
-        const uint32_t* tokenized_text,
-        uint32_t text_length);
+        const void* data,
+        uint32_t bytes);
     void Free(std::shared_ptr<TokenizedBuffer> buffer);
 
 protected:

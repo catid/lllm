@@ -3,19 +3,18 @@
 #include <city.h>
 #include <cpppath.h>
 
-
 //------------------------------------------------------------------------------
 // CompressorContext
 
-bool CompressorContext::WriteTokenizedText(
-    const uint32_t* tokenized_text,
-    uint32_t text_length,
+bool CompressorContext::WriteTokens(
+    const void* tokens,
+    uint32_t token_count,
     OnFileStart on_file_start)
 {
-    bool r = compressor.Compress(
-        tokenized_text,
-        text_length * sizeof(uint32_t),
-        kCompressorByteStride);
+    bool r = compressor_.Compress(
+        tokens,
+        token_count,
+        token_bytes_);
     if (!r) {
         LOG_ERROR() << "Compression failed";
         return false;
@@ -32,16 +31,20 @@ bool CompressorContext::WriteTokenizedText(
         }
     }
 
-    // Write the offset of the current chunk to the index file
-    char current_offset_buffer[4];
-    write_uint32_le(current_offset_buffer, current_file_bytes_);
-    current_index_.write(current_offset_buffer, sizeof(current_offset_buffer));
-    current_index_hash_ ^= CityHash64(current_offset_buffer, sizeof(current_offset_buffer));
+    // Write the offset of the compressed text, and its original length to the index file
+    char index_data[kIndexRecordBytes];
+    write_uint32_le(index_data, current_file_bytes_);
+    write_uint32_le(index_data + 4, token_count);
+    current_index_.write(index_data, kIndexRecordBytes);
+    current_index_hash_ ^= CityHash64(index_data, kIndexRecordBytes);
 
     // Write the compressed data to the current file
-    current_file_.write(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size());
-    current_file_bytes_ += compressor.Result.size();
-    current_file_hash_ ^= CityHash64(reinterpret_cast<const char*>(compressor.Result.data()), compressor.Result.size());
+    const char* compressed_data = reinterpret_cast<const char*>(compressor_.Result.data());
+    const int compressed_bytes = compressor_.Result.size();
+    current_file_.write(compressed_data, compressed_bytes);
+    current_file_hash_ ^= CityHash64(compressed_data, compressed_bytes);
+
+    current_file_bytes_ += compressed_bytes;
 
     if (current_file_.fail() || current_index_.fail()) {
         LOG_ERROR() << "Failed to write to files";
@@ -63,29 +66,22 @@ bool CompressorContext::FinishCurrentFile()
         return true;
     }
 
-    /*
-        End of index file format:
-            <final data file size (4 bytes)>
-            <max region size (4 bytes)>
-            <final index file hash (8 bytes)>
+    // Write end of index file
+    char index_end[kIndexEndBytes];
+    write_uint32_le(index_end, current_file_bytes_);
+    index_end[4] = static_cast<uint8_t>( DATALOADER_VERSION );
+    index_end[5] = static_cast<uint8_t>( token_bytes_ );
+    current_index_hash_ ^= CityHash64(index_end, kIndexRecordBytes - 8);
+    write_uint64_le(index_end + 6, current_index_hash_);
+    current_index_.write(index_end, kIndexRecordBytes);
 
-        The hash also includes the final two fields, hashed individually for consistency.
-    */
-    char current_offset_buffer[4];
-    write_uint32_le(current_offset_buffer, current_file_bytes_);
-    current_index_.write(current_offset_buffer, sizeof(current_offset_buffer));
-    current_index_hash_ ^= CityHash64(current_offset_buffer, sizeof(current_offset_buffer));
-
-    /*
-        End of data file format:
-            <final data file hash (8 bytes)>
-    */
-
-    char file_hash_buffer[8], index_hash_buffer[8];
-    write_uint64_le(file_hash_buffer, current_file_hash_);
-    write_uint64_le(index_hash_buffer, current_index_hash_);
-    current_file_.write(file_hash_buffer, sizeof(file_hash_buffer));
-    current_index_.write(index_hash_buffer, sizeof(index_hash_buffer));
+    // Write end of data file
+    char data_end[kDataEndBytes];
+    index_end[0] = static_cast<uint8_t>( DATALOADER_VERSION );
+    index_end[1] = static_cast<uint8_t>( token_bytes_ );
+    current_file_hash_ ^= CityHash64(data_end, kDataEndBytes - 8);
+    write_uint64_le(data_end + 2, current_file_hash_);
+    current_file_.write(data_end, kDataEndBytes);
 
     if (current_file_.fail() || current_index_.fail()) {
         LOG_ERROR() << "Failed to write tail on files";
@@ -104,9 +100,12 @@ bool CompressorContext::FinishCurrentFile()
 //------------------------------------------------------------------------------
 // TokenizedDataPrep
 
-void TokenizedDataPrep::Start(const std::string& data_folder_path)
+void TokenizedDataPrep::Start(
+    const std::string& data_folder_path,
+    uint32_t token_bytes)
 {
     data_folder_path_ = data_folder_path;
+    token_bytes_ = token_bytes;
 
     current_file_number_ = 0;
     worker_error_ = false;
@@ -115,13 +114,13 @@ void TokenizedDataPrep::Start(const std::string& data_folder_path)
     pool_.Start();
     contexts_.resize(pool_.GetWorkerCount());
     for (int i = 0; i < (int)contexts_.size(); ++i) {
-        contexts_[i] = std::make_shared<CompressorContext>();
+        contexts_[i] = std::make_shared<CompressorContext>(token_bytes_);
     }
 }
 
-bool TokenizedDataPrep::WriteTokenizedText(
-    const uint32_t* tokenized_text,
-    uint32_t text_length)
+bool TokenizedDataPrep::WriteTokens(
+    const void* tokens,
+    uint32_t token_count)
 {
     // Do not allow workers to run ahead more than N tasks at a time
     const int max_active_tasks = 4;
@@ -140,11 +139,11 @@ bool TokenizedDataPrep::WriteTokenizedText(
         current_file_number_++;
     };
 
-    std::shared_ptr<TokenizedBuffer> buffer = allocator_.Allocate(tokenized_text, text_length);
-    pool_.QueueTask([this, on_file_start, buffer](int worker_index) {
-        bool r = contexts_[worker_index]->WriteTokenizedText(
-            buffer->text.data(),
-            buffer->text.size(),
+    std::shared_ptr<TokenizedBuffer> buffer = allocator_.Allocate(tokens, token_count * token_bytes_);
+    pool_.QueueTask([this, on_file_start, buffer, token_count](int worker_index) {
+        bool r = contexts_[worker_index]->WriteTokens(
+            buffer->Data.data(),
+            token_count,
             on_file_start);
         if (!r) {
             LOG_ERROR() << "Worker encountered an error";
@@ -179,6 +178,9 @@ bool TokenizedDataPrep::Stop() {
         LOG_ERROR() << "Failed to open index file: " << index_file_path;
         return false;
     }
+
+    global_index_file << "version: " << DATALOADER_VERSION << std::endl;
+    global_index_file << "token_bytes: " << token_bytes_ << std::endl;
 
     global_index_file << "data_files:" << std::endl;
     for(auto it = data_files_.begin(); it != data_files_.end(); it++) {
