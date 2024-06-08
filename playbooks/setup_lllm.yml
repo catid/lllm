@@ -18,6 +18,12 @@
         name: cmake
         state: present
 
+    - name: Install OpenMPI library
+      become: yes
+      ansible.builtin.apt:
+        name: libopenmpi-dev
+        state: present
+
     - name: Check if lllm repository exists
       ansible.builtin.stat:
         path: "{{ lookup('env', 'HOME') }}/lllm"
