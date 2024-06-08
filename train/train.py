@@ -12,6 +12,7 @@ import argparse
 import yaml
 
 import wandb
+import threading
 
 import deepspeed
 from deepspeed import comm
@@ -106,6 +107,13 @@ def save_deepspeed_model_engine(model_engine, fp16, args):
     }
 
     torch.save(fixed_state_dict, args.output_model)
+
+def save_checkpoint_async(model_engine, args, client_state):
+    # Save checkpoint for resuming
+    model_engine.save_checkpoint(save_dir=args.save_dir, client_state=client_state)
+
+    # Save pth file for evaluation
+    save_deepspeed_model_engine(model_engine, model_engine.fp16_enabled(), args)
 
 def main(args, shard_config):
     t0 = time.time()
@@ -259,7 +267,10 @@ def main(args, shard_config):
                     'step': step,
                     'tokens': tokens
                 }
-                model_engine.save_checkpoint(save_dir=args.output_dir, client_state=client_state)
+
+                # Start a new thread to save the checkpoint
+                checkpoint_thread = threading.Thread(target=save_checkpoint_async, args=(model_engine, args, client_state))
+                checkpoint_thread.start()
 
         log_all(f"Epoch {epoch} complete on rank {rank} - Waiting for peers to complete.")
 
