@@ -29,9 +29,9 @@
       "hysteresis": 2,
       "min_loss_scale": 1
     },
+    "zero_allow_untested_optimizer": true,
     "zero_optimization": {
       "stage": 1,
-      "zero_allow_untested_optimizer": true,
       "allgather_partitions": true,
       "allgather_bucket_size": 2e8,
       "overlap_comm": true,
