@@ -161,6 +161,11 @@ bool TokenizedDataLoader::Start(
     rank_ = rank;
     local_ranks_ = local_ranks;
 
+    if (rank_ >= local_ranks_) {
+        LOG_ERROR() << "Rank " << rank_ << " is out of range (local_ranks=" << local_ranks_ << ")";
+        return false;
+    }
+
     Stop();
 
     global_index_yaml_ = std::make_shared<GlobalIndexYaml>();
