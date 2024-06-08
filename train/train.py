@@ -82,20 +82,11 @@ def train_one_step(optimizer, criterion, model_engine, dataloader):
     if batch is None:
         return None
 
-    log_all(f"Batch: {batch.shape}, is_cont: {is_cont.shape}")
+    input_ids = torch.from_numpy(batch).to(torch.long).to(model_engine.device)
+    labels = input_ids[..., :-1].contiguous()
+    targets = input_ids[..., 1:].contiguous()
 
-    input_ids = torch.from_numpy(batch).to(torch.int32).to(model_engine.device)
-    labels = input_ids.clone()
-
-    logits = model_engine(input_ids)
-
-    print(f"logits.shape={logits.shape}")
-    print(f"logins = {logits}")
-
-    shift_logits = logits[..., :-1, :].contiguous()
-    shift_labels = labels[..., 1:].contiguous()
-
-    loss = criterion(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+    _, loss = model_engine(labels, targets)
 
     optimizer.zero_grad()
     loss.backward()
@@ -128,8 +119,7 @@ def main(args, shard_config):
 
     cfg = LatentLanguageConfig()
     cfg.n_vocab = shard_config["n_vocab"]
-    cfg.dim = 1024
-    cfg.layers = 16
+    cfg.block_size = args.context
     model = LatentLanguage(cfg)
 
     optimizer = schedulefree.AdamWScheduleFree(
@@ -286,10 +276,10 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str, default="my_project", help="Collection of experiments on wandb")
 
     # Hyperparameters
-    parser.add_argument("--lr", type=float, default=0.01, help="Learning rate for training")
-    parser.add_argument("--weight-decay", type=float, default=0.1, help="Weight decay for training")
+    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate for training")
+    parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
-    parser.add_argument("--context", type=int, default=8192, help="Context size for each microbatch")
+    parser.add_argument("--context", type=int, default=1024, help="Context size for each microbatch")
 
     # Training duration
     parser.add_argument("--max-epochs", type=int, default=300, help="Maximum epochs to train")
