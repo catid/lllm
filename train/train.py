@@ -85,14 +85,18 @@ def train_one_step(optimizer, model_engine, dataloader):
     labels = input_ids[..., :-1].contiguous()
     targets = input_ids[..., 1:].contiguous()
 
-    _, loss = model_engine(labels, targets)
+    logits, loss = model_engine(labels, targets)
     tokens_trained = torch.sum(targets != -1).item()
 
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
 
-    return loss.item(), tokens_trained
+    predictions = torch.argmax(logits, dim=-1)
+    correct_predictions = (predictions == targets) & (targets != -1)
+    correct_tokens_count = torch.sum(correct_predictions).item()
+
+    return loss.item(), tokens_trained, correct_tokens_count
 
 def save_deepspeed_model_engine(model_engine, fp16, args):
     # Write output .pth file
@@ -218,7 +222,7 @@ def main(args, shard_config):
         while True:
             start_time = time.time()
 
-            train_loss, train_tokens = train_one_step(optimizer, model_engine, dataloader)
+            train_loss, train_tokens, correct_tokens_count = train_one_step(optimizer, model_engine, dataloader)
 
             if train_loss is None:
                 log_all(f"Epoch {epoch} data exhausted on rank {rank} at step={step}")
@@ -230,14 +234,20 @@ def main(args, shard_config):
             # Sync variables between ranks
             avg_train_loss = torch.tensor(train_loss).cuda(rank)
             sum_tokens = torch.tensor(train_tokens).cuda(rank)
+            sum_correct = torch.tensor(correct_tokens_count).cuda(rank)
             comm.all_reduce(tensor=avg_train_loss, op=comm.ReduceOp.AVG)
             comm.all_reduce(tensor=sum_tokens, op=comm.ReduceOp.SUM)
+            comm.all_reduce(tensor=sum_correct, op=comm.ReduceOp.SUM)
             avg_train_loss = avg_train_loss.item()
-            tokens += sum_tokens.item()
-            tokens_per_second = sum_tokens.item() / step_time
+            sum_tokens = sum_tokens.item()
+            sum_correct = sum_correct.item()
+
+            tokens += sum_tokens
+            tokens_per_second = sum_tokens / step_time
+            correct_pct = sum_correct * 100.0 / sum_tokens
 
             if is_main_process():
-                log_0(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec Tokens={tokens/1000000.0}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
+                log_0(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec correct={correct_pct}% Tokens={tokens/1000000.0}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
 
             step += 1
 
