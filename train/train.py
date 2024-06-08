@@ -304,7 +304,7 @@ if __name__ == "__main__":
     parser.add_argument("--context", type=int, default=1024, help="Context size for each microbatch")
 
     # Checkpointing
-    parser.add_argument("--checkpoint-interval", type=int, default=100, help="Steps between checkpoints")
+    parser.add_argument("--checkpoint-interval", type=int, default=1000, help="Steps between checkpoints")
 
     parser = deepspeed.add_config_arguments(parser)
 
