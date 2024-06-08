@@ -247,7 +247,7 @@ def main(args, shard_config):
             correct_pct = sum_correct * 100.0 / sum_tokens
 
             if is_main_process():
-                log_0(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec correct={correct_pct}% Tokens={tokens/1000000.0}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
+                log_0(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec correct={correct_pct:.2f}% Tokens={tokens/1000000.0:.2f}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
 
             step += 1
 
