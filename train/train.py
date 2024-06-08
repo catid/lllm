@@ -110,7 +110,7 @@ def save_deepspeed_model_engine(model_engine, fp16, args):
 
 def save_checkpoint_async(model_engine, args, client_state):
     # Save checkpoint for resuming
-    model_engine.save_checkpoint(save_dir=args.save_dir, client_state=client_state)
+    model_engine.save_checkpoint(save_dir=args.output_dir, client_state=client_state)
 
     # Save pth file for evaluation
     save_deepspeed_model_engine(model_engine, model_engine.fp16_enabled(), args)
