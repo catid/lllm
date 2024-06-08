@@ -78,19 +78,20 @@ def train_one_step(optimizer, model_engine, dataloader):
     batch, is_cont = dataloader.get_micro_batch()
 
     if batch is None:
-        return None
+        return None, None
 
     input_ids = torch.from_numpy(batch).to(torch.long).to(model_engine.device)
     labels = input_ids[..., :-1].contiguous()
     targets = input_ids[..., 1:].contiguous()
 
     _, loss = model_engine(labels, targets)
+    tokens_trained = torch.count_nonzero(targets).item()
 
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
 
-    return loss.item()
+    return loss.item(), tokens_trained
 
 def save_deepspeed_model_engine(model_engine, fp16, args):
     # Write output .pth file
@@ -184,13 +185,17 @@ def main(args, shard_config):
     if args.compile:
         forward_and_loss = torch.compile(forward_and_loss, dynamic=True, fullgraph=False)
 
-    start_epoch = 0
+    step = 0
+    epoch = 0
+    tokens = 0
 
     if args.resume:
         _, client_state = model_engine.load_checkpoint(load_dir=args.output_dir)
         if client_state is not None:
-            start_epoch = client_state['epoch'] + 1
-            log_all(f"Loaded checkpoint at epoch {client_state['epoch']}")
+            step = client_state['step']
+            epoch = client_state['epoch']
+            tokens = client_state['tokens']
+            log_all(f"Loaded checkpoint at step={step} epoch={epoch}")
         else:
             log_all("No checkpoint found - Starting training from scratch")
     else:
@@ -204,18 +209,18 @@ def main(args, shard_config):
     if not dataloader:
         raise RuntimeError("DataLoader failed to initialize")
 
-    for epoch in range(start_epoch, args.max_epochs):
+    while True:
         # This seed is synchronized between ranks so they do not reuse the same data
         seed2 = epoch
         dataloader.start_epoch(seed, seed2, data_loader_batch_size, args.context)
 
         while True:
-
             start_time = time.time()
 
-            train_loss = train_one_step(optimizer, model_engine, dataloader)
+            train_loss, tokens = train_one_step(optimizer, model_engine, dataloader)
 
             if train_loss is None:
+                log_all(f"Epoch {epoch} data exhausted on rank {rank} at step={step}")
                 break
 
             end_time = time.time()
@@ -223,26 +228,44 @@ def main(args, shard_config):
 
             # Sync variables between ranks
             avg_train_loss = torch.tensor(train_loss).cuda(rank)
+            sum_tokens = torch.tensor(tokens).cuda(rank)
             comm.all_reduce(tensor=avg_train_loss, op=comm.ReduceOp.AVG)
+            comm.all_reduce(tensor=sum_tokens, op=comm.ReduceOp.SUM)
+            avg_train_loss = avg_train_loss.item()
+            tokens = sum_tokens.item()
 
             if is_main_process():
-                log_0(f"Step complete - TrainLoss={avg_train_loss:.4f} Time={epoch_time:.2f} sec")
+                log_0(f"Step complete - TrainLoss={avg_train_loss:.4f} Time={epoch_time:.2f} sec Tokens={tokens/1000000.0}M")
 
-        if is_main_process():
-            log_0(f"Epoch {epoch + 1} - TrainLoss={avg_train_loss:.4f} Time={epoch_time:.2f} sec")
+            step += 1
 
-            if args.wandb:
-                lr = optimizer.param_groups[0]['lr']
-                wandb.log({"avg_train_loss": avg_train_loss, "epoch": epoch, "wallclock_time": epoch_time, "lr": lr})
+            if step % args.checkpoint_interval == 0:
+                if args.wandb:
+                    wandb.log({
+                        "avg_train_loss": avg_train_loss,
+                        "epoch": epoch,
+                        "wallclock_time": epoch_time,
+                        "lr": optimizer.param_groups[0]['lr'],
+                        "tokens": tokens,
+                        "step": step
+                    })
 
-    if is_main_process():
-        t1 = time.time()
-        dt = t1 - t0
+                client_state = {
+                    'train_version': 1,
+                    'avg_train_loss': avg_train_loss,
+                    'fp16': fp16,
+                    'args': args,
+                    'epoch': epoch,
+                    'step': step,
+                    'tokens': tokens
+                }
+                model_engine.save_checkpoint(save_dir=args.output_dir, client_state=client_state)
 
-        log_0(f'Training complete after {dt} seconds.  Best model was written to {args.output_model}')
+        log_all(f"Epoch {epoch} complete on rank {rank} - Waiting for peers to complete.")
 
-        if args.wandb:
-            wandb.finish()
+        comm.barrier()
+
+        epoch += 1
 
 def read_yaml_file(file_path):
     with open(file_path, 'r') as file:
@@ -273,14 +296,13 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str, default="my_project", help="Collection of experiments on wandb")
 
     # Hyperparameters
-    parser.add_argument("--lr", type=float, default=0.003, help="Learning rate for training")
+    parser.add_argument("--lr", type=float, default=0.004, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
     parser.add_argument("--context", type=int, default=1024, help="Context size for each microbatch")
 
-    # Training duration
-    parser.add_argument("--max-epochs", type=int, default=300, help="Maximum epochs to train")
-    parser.add_argument("--patience", type=int, default=50, help="Patience for validation loss not decreasing before early stopping")
+    # Checkpointing
+    parser.add_argument("--checkpoint-interval", type=int, default=100, help="Steps between checkpoints")
 
     parser = deepspeed.add_config_arguments(parser)
 
