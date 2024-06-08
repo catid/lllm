@@ -84,12 +84,12 @@ class Block(nn.Module):
 class LatentLanguageConfig:
     n_vocab: int = 0 # Set to tokenizer n_vocab
 
-    n_embd: int = 512
+    n_embd: int = 384 * 2
     bias: bool = False
     dropout: float = 0.2
-    n_head: int = 6
-    layers: int = 6
-    block_size: int = 4096
+    n_head: int = 12
+    layers: int = 12
+    block_size: int = 256
 
 class LatentLanguage(nn.Module):
     def __init__(self, cfg):
