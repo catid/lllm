@@ -15,4 +15,6 @@ Modify the `hosts.txt` file on your master node to match the ones you configured
 cd training
 conda activate lllm
 
+# Verify that training works
+./launch_local_train.sh --reset
 ```

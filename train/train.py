@@ -47,7 +47,7 @@ def get_true_random_32bit_positive_integer():
     random_int = int.from_bytes(bytes(random_bytes), byteorder='big')
     return random_int
 
-def synchronize_seed(local_rank, rank, seed=1337):
+def synchronize_seed(local_rank, rank, seed=-1):
     if seed < 0:
         seed = get_true_random_32bit_positive_integer()
 
@@ -60,7 +60,7 @@ def synchronize_seed(local_rank, rank, seed=1337):
 
     comm.broadcast(tensor=seed_tensor, src=0)
 
-    seed = int(seed_tensor.item()) + rank
+    seed = int(seed_tensor.item())
 
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -82,14 +82,15 @@ def train_one_step(optimizer, criterion, model_engine, dataloader):
     if batch is None:
         return None
 
-    print(f"Batch: {batch}, is_cont: {is_cont}")
+    log_all(f"Batch: {batch.shape}, is_cont: {is_cont.shape}")
 
-    input_ids = batch["input_ids"].to(model_engine.device)
-    attention_mask = batch["attention_mask"].to(model_engine.device)
+    input_ids = torch.from_numpy(batch).to(torch.int32).to(model_engine.device)
     labels = input_ids.clone()
 
-    outputs = model_engine(input_ids, attention_mask=attention_mask, labels=labels)
-    logits = outputs.logits
+    logits = model_engine(input_ids)
+
+    print(f"logits.shape={logits.shape}")
+    print(f"logins = {logits}")
 
     shift_logits = logits[..., :-1, :].contiguous()
     shift_labels = labels[..., 1:].contiguous()
@@ -156,6 +157,19 @@ def main(args, shard_config):
 
     log_0(f"Arguments: {args}")
 
+    if args.verify_dataset:
+        log_all("Verifying dataset... (should take about one minute per 0.4T tokens using an SSD)")
+
+        if is_main_process():
+            is_valid = DataVerifier.verify(args.dataset_dir)
+
+            if not is_valid:
+                raise RuntimeError("Dataset is corrupted and must be regenerated using dataset/shard_dataset.py")
+
+    if is_main_process():
+        if not os.path.exists(args.output_dir):
+            os.makedirs(args.output_dir)
+
     comm.barrier()
 
     fp16 = model_engine.fp16_enabled()
@@ -168,9 +182,9 @@ def main(args, shard_config):
     data_loader_batch_size = model_engine.train_micro_batch_size_per_gpu()
     steps_per_print = model_engine.steps_per_print()
 
-    seed = synchronize_seed(args, rank, shard_id)
+    log_all(f"Node rank={rank}, num_shards={num_gpus}, shard_id={shard_id}, train_batch_size={train_batch_size}, data_loader_batch_size={data_loader_batch_size}, steps_per_print={steps_per_print}")  
 
-    log_all(f"Node rank={rank}, num_shards={num_gpus}, shard_id={shard_id}, train_batch_size={train_batch_size}, data_loader_batch_size={data_loader_batch_size}, steps_per_print={steps_per_print}, seed={seed}")  
+    seed = synchronize_seed(rank, shard_id)
 
     # Weights & Biases
     if args.wandb and is_main_process():
@@ -187,26 +201,26 @@ def main(args, shard_config):
 
     start_epoch = 0
 
-    if args.reset:
-        log_0("Resetting training - deleting output directory")
-        if rank == 0:
-            delete_folder_contents(args.output_dir)
-        comm.barrier()
-    else:
+    if args.resume:
         _, client_state = model_engine.load_checkpoint(load_dir=args.output_dir)
         if client_state is not None:
             start_epoch = client_state['epoch'] + 1
             log_all(f"Loaded checkpoint at epoch {client_state['epoch']}")
         else:
             log_all("No checkpoint found - Starting training from scratch")
+    else:
+        log_0("Resetting training - deleting output directory")
+        if rank == 0:
+            delete_folder_contents(args.output_dir)
+        comm.barrier()
 
     # DataLoader
-    dataloader = DataLoader(args.dataset, rank=rank, local_ranks=shard_config["rank_count"])
+    dataloader = DataLoader(args.dataset_dir, rank=rank, local_ranks=shard_config["rank_count"])
 
     for epoch in range(start_epoch, args.max_epochs):
         # This seed is synchronized between ranks so they do not reuse the same data
         seed2 = epoch
-        dataloader.start_epoch(seed, seed2, args.microbatch, args.context)
+        dataloader.start_epoch(seed, seed2, data_loader_batch_size, args.context)
 
         while True:
 
@@ -254,7 +268,7 @@ if __name__ == "__main__":
     # Deepspeed
     parser.add_argument("--local_rank", type=int, default=-1)
     parser.add_argument("--output-dir", type=str, default="checkpoints", help="Path to the latest checkpoint for resuming")
-    parser.add_argument("--reset", action="store_true", help="Reset training from scratch")
+    parser.add_argument("--resume", action="store_true", help="Resume training from previous checkpoint")
     parser.add_argument("--output-model", type=str, default="cifar10.pth", help="Output model file name")
 
     # Dataset
@@ -275,7 +289,6 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.1, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
-    parser.add_argument("--microbatch", type=int, default=8, help="Microbatch size for each GPU")
     parser.add_argument("--context", type=int, default=8192, help="Context size for each microbatch")
 
     # Training duration
@@ -301,16 +314,6 @@ if __name__ == "__main__":
     if local_ranks != shard_config["rank_count"]:
         raise RuntimeError(f"Number of GPUs ({local_ranks}) does not rank_count from shard config ({shard_config['rank_count']})")
 
-    print(f"Shard config: {shard_config}")
-
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
-
-    if args.verify_dataset:
-        print("Verifying dataset... (should take about one minute per 0.4T tokens using an SSD)")
-        is_valid = DataVerifier.verify(args.dataset_dir)
-
-        if not is_valid:
-            raise RuntimeError("Dataset is corrupted and must be regenerated using dataset/shard_dataset.py")
+    log_all(f"Shard config: {shard_config}")
 
     main(args, shard_config)
