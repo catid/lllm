@@ -2,6 +2,8 @@
 
 #include "tools.hpp"
 
+#include <cstring>
+
 bool test_data_verify() {
     if (!VerifyDataset("test_data")) {
         LOG_ERROR() << "test_data_verify test failed";
@@ -27,8 +29,9 @@ bool test_data_loader() {
     uint64_t seed1 = 0;
     uint32_t k_micro_batch_size = 64;
     uint32_t k_context_size = 8192;
+    uint32_t k_start_step = 0;
 
-    loader.StartEpoch(seed0, seed1, k_micro_batch_size, k_context_size);
+    loader.StartEpoch(seed0, seed1, k_micro_batch_size, k_context_size, k_start_step);
 
     uint64_t total_spans = 0;
 
@@ -68,6 +71,81 @@ bool test_data_loader() {
     return true;
 }
 
+bool test_k_start_step(int steps) {
+    TokenizedDataLoader loader1, loader2;
+
+    uint32_t rank = 0;
+    uint32_t local_ranks = 1;
+
+    if (!loader1.Start("test_data", rank, local_ranks) || !loader2.Start("test_data", rank, local_ranks)) {
+        LOG_ERROR() << "Failed to start data loader";
+        return false;
+    }
+
+    uint64_t seed0 = 0;
+    uint64_t seed1 = 0;
+    uint32_t k_micro_batch_size = 1;
+    uint32_t k_context_size = 8192;
+
+    // Loader1: Advance 10 steps
+    loader1.StartEpoch(seed0, seed1, k_micro_batch_size, k_context_size, 0);
+    for (int i = 0; i < steps; ++i) {
+        uint32_t micro_batch_size;
+        uint32_t num_tokens;
+        int32_t output_batch[k_micro_batch_size * k_context_size];
+        uint8_t is_continuation[k_micro_batch_size];
+
+        if (!loader1.GetTokenArray(&micro_batch_size, &num_tokens, output_batch, is_continuation)) {
+            LOG_ERROR() << "Loader1 failed to get token array on step " << i;
+            return false;
+        }
+
+        LOG_INFO() << "Loader1 step " << i+1 << ": " << output_batch[0] << " - " << (int)is_continuation[0];
+    }
+
+    // Save the output of the 10th call
+    uint32_t micro_batch_size1;
+    uint32_t num_tokens1;
+    int32_t output_batch1[k_micro_batch_size * k_context_size];
+    uint8_t is_continuation1[k_micro_batch_size];
+    if (!loader1.GetTokenArray(&micro_batch_size1, &num_tokens1, output_batch1, is_continuation1)) {
+        LOG_ERROR() << "Loader1 failed to get token array on the 11th step";
+        return false;
+    }
+
+    LOG_INFO() << "Loader1 step next: " << output_batch1[0] << " - " << (int)is_continuation1[0];
+
+    loader1.Stop();
+
+    // Loader2: Start with k_start_step = 10
+    uint32_t k_start_step = steps;
+    loader2.StartEpoch(seed0, seed1, k_micro_batch_size, k_context_size, k_start_step);
+
+    uint32_t micro_batch_size2;
+    uint32_t num_tokens2;
+    int32_t output_batch2[k_micro_batch_size * k_context_size];
+    uint8_t is_continuation2[k_micro_batch_size];
+    if (!loader2.GetTokenArray(&micro_batch_size2, &num_tokens2, output_batch2, is_continuation2)) {
+        LOG_ERROR() << "Loader2 failed to get token array with k_start_step = 10";
+        return false;
+    }
+
+    LOG_INFO() << "Loader2 step " << steps << ": " << output_batch2[0] << " - " << (int)is_continuation2[0];
+
+    loader2.Stop();
+
+    // Compare the results
+    if (micro_batch_size1 != micro_batch_size2 || num_tokens1 != num_tokens2 || 
+        memcmp(output_batch1, output_batch2, sizeof(output_batch1)) != 0 || 
+        memcmp(is_continuation1, is_continuation2, sizeof(is_continuation1)) != 0) {
+        LOG_ERROR() << "k_start_step test failed: Outputs do not match";
+        return false;
+    }
+
+    LOG_INFO() << "k_start_step test passed";
+    return true;
+}
+
 int main() {
     if (!test_data_verify()) {
         return -1;
@@ -75,6 +153,13 @@ int main() {
 
     if (!test_data_loader()) {
         return -1;
+    }
+
+    for (int i = 0; i < 100; ++i) {
+        LOG_INFO() << "---- k_start_step test " << i;
+        if (!test_k_start_step(i)) {
+            return -1;
+        }
     }
 
     LOG_INFO() << "All tests passed";

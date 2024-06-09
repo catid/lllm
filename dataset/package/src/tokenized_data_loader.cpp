@@ -219,11 +219,14 @@ bool TokenizedDataLoader::Start(
 
 void TokenizedDataLoader::Stop()
 {
+    // Kill the prefill tasks
     pool_.Stop();
+
+    // This kills the trailing read requests
+    shards_.clear();
 
     decompressors_.clear();
     output_used_.clear();
-    shards_.clear();
     global_index_yaml_ = nullptr;
 }
 
@@ -317,8 +320,10 @@ void TokenizedDataLoader::Prefill() {
     for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index)
     {
         auto& decompressor = decompressors_[batch_index];
-        const uint32_t decompressed_words = decompressor->Result.size() / 4;
+        const uint32_t decompressed_words = decompressor->Result.size();
         const uint32_t used = output_used_[batch_index];
+
+        LOG_INFO() << "Prefill: batch_index=" << batch_index << ", used=" << used << ", decompressed_words=" << decompressed_words;
 
         // If there is still data to read, do not prefill this row
         if (used > 0 && used < decompressed_words) {
@@ -414,7 +419,7 @@ void TokenizedDataLoader::PostRequests(int continuations, const std::vector<Read
                 // This is used only for skipping
                 output_used_[request.batch_index] = request.offset;
 
-                //LOG_INFO() << "Decompressed " << decompressor->Result.size() << " bytes from " << cbytes << " for shard=" << request.shard_index << " index=" << request.shard_span_index << " offset=" << offset;
+                LOG_INFO() << "Decompressed " << decompressor->Result.size() << " bytes from " << cbytes << " for shard=" << request.shard_index << " index=" << request.shard_span_index << " offset=" << offset;
 
                 uint32_t remaining = --prefill_inflight_;
                 if (remaining == 0) {
@@ -462,6 +467,10 @@ bool TokenizedDataLoader::Skip(int steps)
     std::vector<int> available(micro_batch_size_);
     std::vector<ReadRequest> requests(micro_batch_size_);
 
+    for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index) {
+        output_used_[batch_index] = 0;
+    }
+
     for (int i = 0; i < steps; ++i)
     {
         for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index)
@@ -497,6 +506,36 @@ bool TokenizedDataLoader::Skip(int steps)
             available[batch_index] = original_tokens;
             request.offset = context_size_;
         }
+    }
+
+    for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index)
+    {
+        ReadRequest& request = requests[batch_index];
+
+        const int remaining = available[batch_index] - request.offset;
+        if (remaining > 0) {
+            continue;
+        }
+
+        if (!NextSpan(request)) {
+            available[batch_index] = 0;
+            break; // No more data to read
+        }
+
+        uint64_t offset = 0;
+        uint32_t cbytes = 0, original_tokens = 0;
+        bool r = shards_[request.shard_index]->GetSpan(
+            request.shard_span_index,
+            offset,
+            cbytes,
+            original_tokens);
+        if (!r) {
+            LOG_ERROR() << "Failed to read span " << request.shard_span_index
+                << " from shard " << request.shard_index;
+            return false;
+        }
+
+        request.offset = 0;
     }
 
     PostRequests(0, requests);
@@ -544,7 +583,7 @@ bool TokenizedDataLoader::GetTokenArray(
         }
         uint32_t copy_words = std::min(available, context_size_);
 
-        LOG_DEBUG() << "batch_index=" << batch_index << ", copy_words=" << copy_words << ", used=" << used << ", available=" << available << ", decompressed_words=" << decompressed_words;
+        LOG_INFO() << "batch_index=" << batch_index << ", copy_words=" << copy_words << ", used=" << used << ", available=" << available << ", decompressed_words=" << decompressed_words;
 
         memcpy(output_batch, decompressed_ptr + used, copy_words * sizeof(uint32_t));
         output_batch += copy_words;

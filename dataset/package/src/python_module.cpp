@@ -35,10 +35,11 @@ void data_loader_start_epoch(
     void* data_loader,
     uint64_t seed0, uint64_t seed1,
     uint32_t micro_batch_size,
-    uint32_t context_size)
+    uint32_t context_size,
+    uint32_t start_step)
 {
     TokenizedDataLoader* loader = static_cast<TokenizedDataLoader*>(data_loader);
-    loader->StartEpoch(seed0, seed1, micro_batch_size, context_size);
+    loader->StartEpoch(seed0, seed1, micro_batch_size, context_size, start_step);
 }
 
 bool data_loader_get_micro_batch(
