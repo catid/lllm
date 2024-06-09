@@ -161,7 +161,7 @@ def main():
         if tokenized_text is None:  # Check for the sentinel value
             break
 
-        data_prep.write_tokenized_text(tokenized_text)
+        data_prep.write_token(tokenized_text)
 
     # Ensure all worker processes have finished
     for p in pool:
