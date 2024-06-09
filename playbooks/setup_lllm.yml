@@ -50,11 +50,9 @@
         update: yes
 
     - name: Initialize git-lfs
-      ansible.builtin.shell:
-        cmd: git lfs install
-        args:
-          executable: /bin/bash
-          chdir: "{{ lookup('env', 'HOME') }}/lllm"
+      shell: |
+        cd "{{ lookup('env', 'HOME') }}/lllm"
+        git lfs install
 
     - name: Check if lllm conda environment exists
       ansible.builtin.shell:
