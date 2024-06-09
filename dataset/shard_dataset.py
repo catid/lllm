@@ -1,16 +1,14 @@
 import os
-import glob
 import argparse
 import pyarrow.parquet as pq
 import requests
 import shutil
 import git
-from multiprocessing import Process, Queue, Pool
+from multiprocessing import Process, Queue
 import time
 import tempfile
 import yaml
 import tiktoken
-from tqdm import tqdm
 from cpp_dataloader import DataPreparation
 import torch
 
@@ -158,7 +156,11 @@ def clone_and_move_file(file_path, temp_dir, dataset_user, dataset_name):
     download_time = end_time - start_time  # Time in seconds
     download_speed = file_size / download_time / (1000 * 1000) # Speed in MB/s
 
+    if file_size == 0:
+        return None
+
     print(f"\nDownloaded {dst_file_path}: {download_speed:.2f} MB/s ({file_size/1000000.0:.2f} MB)")
+
     return dst_file_path
 
 def download_worker(filename_queue, download_queue, args):
@@ -169,16 +171,22 @@ def download_worker(filename_queue, download_queue, args):
         if file_path is None:
             break
 
-        temp_dir = tempfile.mkdtemp()
-        #print(f"Using temporary directory for download: {temp_dir}")
+        while True:
+            temp_dir = tempfile.mkdtemp()
 
-        os.chdir(temp_dir)
+            print(f"Downloading {file_path} -> {temp_dir}")
 
-        dst_file_path = clone_and_move_file(file_path, temp_dir, args.dataset_user, args.dataset_name)
+            os.chdir(temp_dir)
 
-        os.chdir(curdir)
+            dst_file_path = clone_and_move_file(file_path, temp_dir, args.dataset_user, args.dataset_name)
 
-        download_queue.put(dst_file_path)
+            os.chdir(curdir)
+
+            if dst_file_path is None:
+                shutil.rmtree(temp_dir)
+                continue
+
+            download_queue.put(dst_file_path)
 
 def main():
     parser = argparse.ArgumentParser(description="Read and process shards of a Parquet file.")
