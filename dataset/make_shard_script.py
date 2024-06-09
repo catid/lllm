@@ -37,6 +37,8 @@ def generate_master_script(hosts, world_size, args):
         ]
         if args.just_args:
             command_parts.append("--just_args")
+        if args.byte_tokens:
+            command_parts.append("--byte_tokens")
 
         command = " ".join(command_parts)
 
@@ -70,6 +72,7 @@ def main():
     parser.add_argument('--conda-dir', type=str, default="~/mambaforge", help="Conda environment directory.")
     parser.add_argument('--username', type=str, default=None, help="SSH username.")
     parser.add_argument("--just_args", action="store_true", help="Just write the args file and exit.")
+    parser.add_argument("--byte_tokens", action="store_true", help="Tokenize using byte tokens instead of word tokens.")
 
     args = parser.parse_args()
     
