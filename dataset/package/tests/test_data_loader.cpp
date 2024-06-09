@@ -59,6 +59,11 @@ bool test_data_loader() {
 
     loader.Stop();
 
+    if (total_spans == 0) {
+        LOG_ERROR() << "Data loader did not produce any spans";
+        return false;
+    }
+
     LOG_INFO() << "test_data_loader test passed";
     return true;
 }

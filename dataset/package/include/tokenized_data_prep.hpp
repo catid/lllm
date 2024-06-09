@@ -79,6 +79,7 @@ public:
 private:
     std::string data_folder_path_ = ".";
     uint32_t token_bytes_ = 0;
+    std::atomic<uint64_t> total_tokens_ = ATOMIC_VAR_INIT(0);
 
     std::vector<std::shared_ptr<CompressorContext>> contexts_;
     WorkerPool pool_;

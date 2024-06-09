@@ -73,10 +73,11 @@ struct DataShardContext {
         uint64_t seed0, uint64_t seed1,
         uint32_t rank,
         uint32_t local_ranks);
-    uint64_t GetSpan(
+    bool GetSpan(
         uint32_t span_index,
+        uint64_t& offset_out,
         uint32_t& cbytes_out,
-        uint32_t& original_bytes_out);
+        uint32_t& original_tokens_out);
 
     // The following are filled in by ShuffleIndices():
 
@@ -188,7 +189,7 @@ private:
     std::atomic<bool> prefill_complete_ = ATOMIC_VAR_INIT(false);
 
     std::atomic<uint64_t> total_disk_read_ = ATOMIC_VAR_INIT(0);
-    std::atomic<uint64_t> total_decompressed_bytes_ = ATOMIC_VAR_INIT(0);
+    std::atomic<uint64_t> total_decompressed_tokens_ = ATOMIC_VAR_INIT(0);
 
     std::mutex output_mutex_;
     std::condition_variable output_condition_;

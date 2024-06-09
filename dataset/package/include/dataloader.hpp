@@ -32,6 +32,9 @@
         <final index file hash (8 bytes)>
 
     The hash includes all bytes preceding it.
+
+    To retrieve the size of the compressed data,
+    subtract consecutive file offsets.
 */
 
 // Size of a record in the index files

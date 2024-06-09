@@ -44,7 +44,7 @@ bool DataShardContext::Open(
         return false;
     }
 
-    const uint8_t* span_data = IndexFile->GetData();
+    const uint8_t* span_data = index_reader->GetData();
     const uint32_t data_file_bytes = read_uint32_le(span_data + index_file_bytes - kIndexEndBytes);
     const uint32_t index_version = span_data[index_file_bytes - kIndexEndBytes + 4];
     const uint32_t index_token_bytes = span_data[index_file_bytes - kIndexEndBytes + 5];
@@ -105,36 +105,38 @@ void DataShardContext::ShuffleIndices(
     EpochNextSpan = 0;
 }
 
-uint64_t DataShardContext::GetSpan(
+bool DataShardContext::GetSpan(
     uint32_t span_index,
+    uint64_t& offset_out,
     uint32_t& cbytes_out,
-    uint32_t& original_bytes_out)
+    uint32_t& original_tokens_out)
 {
     if (span_index >= NumSpans) {
         LOG_ERROR() << "Internal error: Requested span index " << span_index << " is out of range";
-        return 0;
+        return false;
     }
 
     uint32_t index = EpochSpanData[span_index];
 
     if (index * 4 >= IndexFile->GetSize()) {
         LOG_ERROR() << "Internal error: Requested index " << index << " is out of range";
-        return 0;
+        return false;
     }
 
     const uint8_t* span_data = IndexFile->GetData() + index * kIndexRecordBytes;
     const uint32_t start = read_uint32_le(span_data);
-    const uint32_t original_bytes = read_uint32_le(span_data + 4);
+    const uint32_t original_tokens = read_uint32_le(span_data + 4);
     const uint32_t end = read_uint32_le(span_data + kIndexRecordBytes);
 
     if (start >= end) {
         LOG_ERROR() << "Internal error: Span index " << span_index << " has invalid start=" << start << " end=" << end;
-        return 0;
+        return false;
     }
 
+    offset_out = start;
     cbytes_out = end - start;
-    original_bytes_out = original_bytes;
-    return start;
+    original_tokens_out = original_tokens;
+    return true;
 }
 
 
@@ -357,21 +359,23 @@ void TokenizedDataLoader::Prefill() {
             }
 
             // Read offsets from mmap index file
+            uint64_t offset = 0;
             uint32_t cbytes = 0;
-            uint32_t original_bytes = 0;
-            uint64_t offset = shards_[request.shard_index]->GetSpan(
+            uint32_t original_tokens = 0;
+            bool span_okay = shards_[request.shard_index]->GetSpan(
                 request.shard_span_index,
+                offset,
                 cbytes,
-                original_bytes);
+                original_tokens);
 
-            if (cbytes == 0) {
+            if (!span_okay) {
                 LOG_ERROR() << "Invalid span data for shard=" << request.shard_index << " index=" << request.shard_span_index;
                 worker_error_ = true;
                 return;
             }
 
             shards_[request.shard_index]->DataFile->Read(offset, cbytes,
-                [this, cbytes, original_bytes, offset, request](
+                [this, cbytes, original_tokens, offset, request](
                     uint8_t* compressed_data,
                     uint32_t compressed_bytes)
             {
@@ -384,17 +388,18 @@ void TokenizedDataLoader::Prefill() {
                 total_disk_read_ += compressed_bytes;
 
                 auto& decompressor = decompressors_[request.batch_index];
+
                 bool r = decompressor->Decompress(
                     compressed_data,
                     compressed_bytes,
-                    original_bytes,
+                    original_tokens,
                     token_bytes_);
                 if (!r) {
                     LOG_ERROR() << "Failed to decompress data for shard=" << request.shard_index << " index=" << request.shard_span_index;
                     worker_error_ = true;
                 }
 
-                total_decompressed_bytes_ += decompressor->Result.size();
+                total_decompressed_tokens_ += decompressor->Result.size();
 
                 //LOG_INFO() << "Decompressed " << decompressor->Result.size() << " bytes from " << cbytes << " for shard=" << request.shard_index << " index=" << request.shard_span_index << " offset=" << offset;
 
@@ -469,8 +474,8 @@ bool TokenizedDataLoader::GetTokenArray(
         if (!decompressor) {
             continue;
         }
-        const uint32_t* decompressed_ptr = reinterpret_cast<const uint32_t*>( decompressor->Result.data() );
-        const uint32_t decompressed_words = decompressor->Result.size() / 4;
+        const int32_t* decompressed_ptr = decompressor->Result.data();
+        const uint32_t decompressed_words = decompressor->Result.size();
 
         const uint32_t used = output_used_[batch_index];
         const uint32_t available = decompressed_words - used;
@@ -514,7 +519,7 @@ bool TokenizedDataLoader::GetTokenArray(
     *max_tokens_out = max_token_count;
 
     if (num_rows == 0) {
-        LOG_INFO() << "GetTokenArray: Training data exhausted.  Disk compression: " << (total_disk_read_ * 100.0 / total_decompressed_bytes_) << "% of original tokens"; 
+        LOG_INFO() << "GetTokenArray: Training data exhausted.  Disk compression: " << (total_disk_read_ / total_decompressed_tokens_) << " bytes/token";
         return false;
     }
 
