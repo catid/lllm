@@ -67,21 +67,25 @@ bool CompressorContext::FinishCurrentFile()
     }
 
     // Write end of index file
-    char index_end[kIndexEndBytes];
-    write_uint32_le(index_end, current_file_bytes_);
-    index_end[4] = static_cast<uint8_t>( DATALOADER_VERSION );
-    index_end[5] = static_cast<uint8_t>( token_bytes_ );
-    current_index_hash_ ^= CityHash64(index_end, kIndexEndBytes - 8);
-    write_uint64_le(index_end + 6, current_index_hash_);
-    current_index_.write(index_end, kIndexEndBytes);
+    {
+        char index_end[kIndexEndBytes];
+        write_uint32_le(index_end, current_file_bytes_);
+        index_end[4] = static_cast<uint8_t>( DATALOADER_VERSION );
+        index_end[5] = static_cast<uint8_t>( token_bytes_ );
+        current_index_hash_ ^= CityHash64(index_end, kIndexEndBytes - 8);
+        write_uint64_le(index_end + kIndexEndBytes - 8, current_index_hash_);
+        current_index_.write(index_end, kIndexEndBytes);
+    }
 
     // Write end of data file
-    char data_end[kDataEndBytes];
-    data_end[0] = static_cast<uint8_t>( DATALOADER_VERSION );
-    data_end[1] = static_cast<uint8_t>( token_bytes_ );
-    current_file_hash_ ^= CityHash64(data_end, kDataEndBytes - 8);
-    write_uint64_le(data_end + 2, current_file_hash_);
-    current_file_.write(data_end, kDataEndBytes);
+    {
+        char data_end[kDataEndBytes];
+        data_end[0] = static_cast<uint8_t>( DATALOADER_VERSION );
+        data_end[1] = static_cast<uint8_t>( token_bytes_ );
+        current_file_hash_ ^= CityHash64(data_end, kDataEndBytes - 8);
+        write_uint64_le(data_end + kDataEndBytes - 8, current_file_hash_);
+        current_file_.write(data_end, kDataEndBytes);
+    }
 
     if (current_file_.fail() || current_index_.fail()) {
         LOG_ERROR() << "Failed to write tail on files";

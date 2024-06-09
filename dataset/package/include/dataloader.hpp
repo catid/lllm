@@ -26,7 +26,7 @@
         <original text length in tokens (4 bytes)>
 
     End of index file format:
-        <final data file size (4 bytes)>
+        <final data file size (4 bytes)> (must be the first field)
         <version (1 byte)>
         <token_bytes (1 byte)>
         <final index file hash (8 bytes)>

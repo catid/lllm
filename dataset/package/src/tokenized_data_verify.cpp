@@ -55,7 +55,7 @@ bool verify_files(
     uint32_t data_version = static_cast<uint8_t>( data_end[0] );
     uint32_t data_token_bytes = static_cast<uint8_t>( data_end[1] );
     uint64_t data_hash = read_uint64_le(data_end + kDataEndBytes - 8);
-    data_hash ^= CityHash64(data_end, kIndexEndBytes - 8);
+    data_hash ^= CityHash64(data_end, kDataEndBytes - 8);
 
     if (DATALOADER_VERSION != data_version) {
         LOG_ERROR() << "Data file version mismatch: expected " << DATALOADER_VERSION << ", found " << data_version;
