@@ -275,7 +275,7 @@ def main():
 
     # Create a pool of download worker processes
     download_pool = []
-    for _ in range(2):
+    for _ in range(1):
         p = Process(target=download_worker, args=(filename_queue, download_queue, args))
         p.start()
         download_pool.append(p)

@@ -31,7 +31,7 @@ lib.data_loader_create.restype = ctypes.c_void_p
 lib.data_loader_destroy.argtypes = [ctypes.c_void_p]
 lib.data_loader_destroy.restype = None
 
-lib.data_loader_start_epoch.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32]
+lib.data_loader_start_epoch.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
 lib.data_loader_start_epoch.restype = None
 
 lib.data_loader_get_micro_batch.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_uint8)]
@@ -65,10 +65,10 @@ class DataLoader:
             lib.data_loader_destroy(self.data_loader)
             self.data_loader = None
 
-    def start_epoch(self, seed0, seed1, micro_batch_size, context_size):
+    def start_epoch(self, seed0, seed1, micro_batch_size, context_size, start_step=0):
         self.context_size = context_size
         self.microbatch_size = micro_batch_size
-        lib.data_loader_start_epoch(self.data_loader, seed0, seed1, micro_batch_size, context_size)
+        lib.data_loader_start_epoch(self.data_loader, seed0, seed1, micro_batch_size, context_size, start_step)
 
     def get_micro_batch(self):
         micro_batch_size = ctypes.c_uint32()
