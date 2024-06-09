@@ -158,7 +158,7 @@ def clone_and_move_file(file_path, temp_dir, dataset_user, dataset_name):
     download_time = end_time - start_time  # Time in seconds
     download_speed = file_size / download_time / (1000 * 1000) # Speed in MB/s
 
-    #print(f"\nDownloaded {dst_file_path}: {download_speed:.2f} MB/s")
+    print(f"\nDownloaded {dst_file_path}: {download_speed:.2f} MB/s ({file_size/1000000.0:.2f} MB)")
     return dst_file_path
 
 def download_worker(filename_queue, download_queue, args):
