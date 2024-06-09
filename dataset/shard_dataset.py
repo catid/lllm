@@ -223,7 +223,7 @@ def main():
     total_files = len(file_paths)
     shard_size = (total_files + args.world_size - 1) // args.world_size
     start_index = args.rank_start * shard_size
-    end_index = min(start_index + shard_size, total_files)
+    end_index = min(start_index + args.rank_count, total_files)
     shard_file_paths = file_paths[start_index:end_index]
     shard_file_count = len(shard_file_paths)
 

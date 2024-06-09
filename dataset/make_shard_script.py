@@ -29,7 +29,8 @@ def generate_master_script(hosts, world_size, args):
     for hostname, rank_count in hosts:
         command_parts = [
             f"{args.conda_dir}/envs/{args.conda_env}/bin/python {args.source_dir}/shard_dataset.py",
-            f"--dataset_dir {args.dataset_dir}",
+            f"--dataset_user {args.dataset_user}",
+            f"--dataset_name {args.dataset_name}",
             f"--rank_start {rank_start}",
             f"--rank_count {rank_count}",
             f"--world_size {world_size}",
@@ -65,7 +66,8 @@ def generate_master_script(hosts, world_size, args):
 def main():
     parser = argparse.ArgumentParser(description="Generate a shell script to run a Python script on multiple hosts using pdsh.")
     parser.add_argument('--hosts-file', type=str, default="hosts.txt", help="Path to the hosts file (default: hosts.txt).")
-    parser.add_argument('--dataset-dir', type=str, default="/mnt/Media/datasets/fineweb-edu", help="Dataset location.")
+    parser.add_argument('--dataset_user', type=str, default="HuggingFaceFW", help="Dataset user.")
+    parser.add_argument('--dataset_name', type=str, default="fineweb-edu", help="Dataset name.")
     parser.add_argument('--output-dir', type=str, default="~/dataset_shard", help="Output shard directory.")
     parser.add_argument('--source-dir', type=str, default="~/lllm/dataset", help="Source directory.")
     parser.add_argument('--conda-env', type=str, default="lllm", help="Conda environment name.")
