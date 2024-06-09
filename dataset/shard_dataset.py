@@ -271,6 +271,7 @@ def main():
 
     for file_path in shard_file_paths:
         filename_queue.put(file_path)
+    filename_queue.put(None)
 
     # Create a pool of download worker processes
     download_pool = []
