@@ -24,6 +24,12 @@
         name: libopenmpi-dev
         state: present
 
+    - name: Install git-lfs
+      become: yes
+      ansible.builtin.apt:
+        name: git-lfs
+        state: present
+
     - name: Check if lllm repository exists
       ansible.builtin.stat:
         path: "{{ lookup('env', 'HOME') }}/lllm"
@@ -42,6 +48,13 @@
         dest: "{{ lookup('env', 'HOME') }}/lllm"
         update: "{{ lllm_repository.stat.exists }}"
         update: yes
+
+    - name: Initialize git-lfs
+      ansible.builtin.shell:
+        cmd: git lfs install
+        args:
+          executable: /bin/bash
+          chdir: "{{ lookup('env', 'HOME') }}/lllm"
 
     - name: Check if lllm conda environment exists
       ansible.builtin.shell:
