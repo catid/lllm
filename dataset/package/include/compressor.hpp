@@ -5,7 +5,7 @@
     Byte stride is the width of the words.
 
     To improve compression, we put each byte of each word in its own plane
-    in the compressed data.  For example if byte_stride=4, then we store
+    in the compressed data.  For example if token_bytes=4, then we store
     all of the low bytes of each word together in the first plane.
     In my experience this improves compression because usually the high
     bytes are all zeroes and can be efficiently compressed with RLE.

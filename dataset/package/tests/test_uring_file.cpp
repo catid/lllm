@@ -20,7 +20,7 @@ std::vector<uint64_t> read_offsets;
 int total_reads = 0;
 std::atomic<int> num_errors(0);
 
-bool create_test_file() {
+bool create_test_file(uint64_t& total_bytes) {
     LOG_INFO() << "Creating test file...";
 
     std::ofstream file(kTestFile, std::ios::binary);
@@ -30,7 +30,7 @@ bool create_test_file() {
     }
 
     uint64_t last_log_bytes = 0;
-    uint64_t total_bytes = 0;
+    total_bytes = 0;
     uint8_t buffer[kMaxReadBytes];
 
     read_sizes.clear();
@@ -68,12 +68,20 @@ bool create_test_file() {
 }
 
 bool RunTest() {
-    create_test_file();
+    uint64_t test_file_bytes = 0;
+    if (!create_test_file(test_file_bytes)) {
+        return false;
+    }
 
     LOG_INFO() << "Performing random-access reads and verifying data...";
     AsyncUringReader reader;
     if (!reader.Open(kTestFile)) {
         LOG_ERROR() << "Failed to open AsyncUringReader";
+        return false;
+    }
+
+    if (reader.GetSize() != test_file_bytes) {
+        LOG_ERROR() << "AsyncUringReader size mismatch: expected " << test_file_bytes << ", found " << reader.GetSize();
         return false;
     }
 

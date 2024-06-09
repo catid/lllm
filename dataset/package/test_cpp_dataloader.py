@@ -20,12 +20,12 @@ if __name__ == "__main__":
     try:
         start_time = time.time()
         
-        prep = DataPreparation(data_path)
+        prep = DataPreparation(data_path, byte_tokens=False)
         
         for _ in range(4000):
             num_tokens = random.randint(1, 20000)
             tokens = [random.randint(0, 128000) for _ in range(num_tokens)]
-            prep.write_tokenized_text(tokens)
+            prep.write_tokens(tokens)
         
         prep.destroy()
         

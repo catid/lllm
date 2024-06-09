@@ -116,6 +116,7 @@ def main():
     parser.add_argument('--output_dir', type=str, default="dataset_shard", help="Output directory.")
     parser.add_argument('--encoding', type=str, default="o200k_base", help="Tiktoken encoding.")
     parser.add_argument("--just_args", action="store_true", help="Just write the args file and exit.")
+    parser.add_argument("--byte_tokens", action="store_true", help="Tokenize using byte tokens instead of word tokens.")
 
     args = parser.parse_args()
 
@@ -139,7 +140,7 @@ def main():
         print("Just wrote the args file.  Exiting.")
         return
 
-    data_prep = DataPreparation(args.output_dir)
+    data_prep = DataPreparation(args.output_dir, byte_tokens=args.byte_tokens)
 
     parquet_files = get_parquet_files(args.dataset_dir)
     queue = Queue(maxsize=128)

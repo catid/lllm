@@ -68,21 +68,22 @@ bool Compressor::Compress(
 bool Decompressor::Decompress(
     const void* compressed_data,
     uint32_t compressed_bytes,
-    uint32_t original_bytes,
-    uint32_t byte_stride)
+    uint32_t original_tokens,
+    uint32_t token_bytes)
 {
     if (!compressed_data || compressed_bytes <= 0) {
         LOG_ERROR() << "Decompressor: Invalid compressed bytes=" << compressed_bytes;
         return false;
     }
-    if (original_bytes <= 0 || byte_stride <= 0 || original_bytes % byte_stride != 0) {
-        LOG_ERROR() << "Decompressor: Decompressed data=" << original_bytes
-            << " not divisible by byte_stride=" << byte_stride;
+    if (original_tokens <= 0 || token_bytes <= 0) {
+        LOG_ERROR() << "Decompressor: Invalid data=" << original_tokens
+            << " token_bytes=" << token_bytes;
         return false;
     }
 
-    const uint32_t word_count = original_bytes / byte_stride;
-    Result.resize(word_count);
+    const uint32_t original_bytes = original_tokens * token_bytes;
+
+    Result.resize(original_tokens);
     Packed.resize(original_bytes);
     uint8_t* decompressed = Packed.data();
 
@@ -100,10 +101,10 @@ bool Decompressor::Decompress(
 
     uint32_t* unpacked = reinterpret_cast<uint32_t*>( Result.data() );
 
-    for (uint32_t i = 0; i < word_count; ++i) {
+    for (uint32_t i = 0; i < original_tokens; ++i) {
         uint8_t unpacked_word[8] = {0};
-        for (uint32_t j = 0; j < byte_stride; j++) {
-            unpacked_word[j] = decompressed[i + j * word_count];
+        for (uint32_t j = 0; j < token_bytes; j++) {
+            unpacked_word[j] = decompressed[i + j * original_tokens];
         }
 
         unpacked[i] = read_uint32_le(unpacked_word);

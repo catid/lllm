@@ -44,8 +44,8 @@ lib.data_prep_create.restype = ctypes.c_void_p
 lib.data_prep_destroy.argtypes = [ctypes.c_void_p]
 lib.data_prep_destroy.restype = None
 
-lib.data_prep_write_tokenized_text.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32]
-lib.data_prep_write_tokenized_text.restype = ctypes.c_bool
+lib.data_prep_write_tokens.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32]
+lib.data_prep_write_tokens.restype = ctypes.c_bool
 
 # Data Verification
 lib.data_verify.argtypes = [ctypes.c_char_p]
@@ -85,8 +85,8 @@ class DataLoader:
         return output_array[:micro_batch_size.value, :num_tokens.value], is_continuation[:micro_batch_size.value]
 
 class DataPreparation:
-    def __init__(self, data_folder_path, is_tokenized):
-        self.token_bytes = 4 if is_tokenized else 1
+    def __init__(self, data_folder_path, byte_tokens):
+        self.token_bytes = 1 if byte_tokens else 4
         self.data_prep = lib.data_prep_create(data_folder_path.encode(), self.token_bytes)
         if not self.data_prep:
             raise RuntimeError("Failed to create data preparation")
@@ -95,6 +95,8 @@ class DataPreparation:
         self.destroy()
 
     def write_tokens(self, tokens):
+        if self.token_bytes == 1:
+            raise RuntimeError("DataPreparation: Tokens must be written in byte format. Use write_bytes()")
         tokens = np.asarray(tokens, dtype=np.uint32)
         success = lib.data_prep_write_tokens(
             self.data_prep,
@@ -104,6 +106,8 @@ class DataPreparation:
             raise RuntimeError("Failed to write tokenized text")
 
     def write_bytes(self, byte_data):
+        if self.token_bytes != 1:
+            raise RuntimeError("DataPreparation: Bytes must be written in word format. Use write_tokens()")
         byte_data = np.asarray(byte_data, dtype=np.uint8)
         success = lib.data_prep_write_tokens(
             self.data_prep,

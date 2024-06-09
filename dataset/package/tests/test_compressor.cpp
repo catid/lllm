@@ -74,12 +74,12 @@ bool TestCompressDecompressVector() {
     Compressor compressor;
     Decompressor decompressor;
 
-    std::vector<uint32_t> original = {1, 2, 3, 4, 5};
+    std::vector<uint32_t> original = {1, 2, 3, 4, 56789};
 
     // Compress the vector
     bool compress_result = compressor.Compress(
         original.data(),
-        original.size() * sizeof(uint32_t),
+        original.size(),
         4);
 
     if (!compress_result) {
@@ -107,7 +107,9 @@ bool TestCompressDecompressVector() {
 
     // Convert decompressed data to vector of integers
     std::vector<uint32_t> decompressed_vector(decompressed_data.size());
-    memcpy(decompressed_vector.data(), decompressed_data.data(), decompressed_data.size());
+    for (uint32_t i = 0; i < decompressed_data.size(); ++i) {
+        decompressed_vector[i] = decompressed_data[i];
+    }
 
     // Check if the decompressed vector matches the original vector
     if (!AreVectorsEqual(original, decompressed_vector)) {
@@ -131,44 +133,42 @@ bool TestCompressDecompressByteStride() {
         original_data[i] = static_cast<uint8_t>(i % 256);
     }
 
-    // Test byte strides from 1 to 4
-    for (int byte_stride = 1; byte_stride <= 4; ++byte_stride) {
+    // Test token_bytes from 1 to 4
+    for (int token_bytes = 1; token_bytes <= 4; ++token_bytes) {
+        const int token_count = original_data.size() / token_bytes;
+
         // Compress the data with the current byte stride
         bool compress_result = compressor.Compress(
             original_data.data(),
-            original_data.size(),
-            byte_stride);
+            token_count,
+            token_bytes);
         if (!compress_result) {
-            LOG_ERROR() << "TestCompressDecompressByteStride: Compression failed for byte_stride " << byte_stride;
+            LOG_ERROR() << "TestCompressDecompressByteStride: Compression failed for token_bytes " << token_bytes;
             return false;
         }
-
-        // Get the compressed data
-        const std::vector<uint8_t>& compressed_data = compressor.Result;
 
         // Decompress the compressed data with the same byte stride
         bool decompress_result = decompressor.Decompress(
-            compressed_data.data(),
-            compressed_data.size(),
-            original_data.size(),
-            byte_stride);
+            compressor.Result.data(),
+            compressor.Result.size(),
+            token_count,
+            token_bytes);
         if (!decompress_result) {
-            LOG_ERROR() << "TestCompressDecompressByteStride: Decompression failed for byte_stride " << byte_stride;
+            LOG_ERROR() << "TestCompressDecompressByteStride: Decompression failed for token_bytes " << token_bytes;
             return false;
         }
 
-        // Get the decompressed data
-        const std::vector<int32_t>& decompressed_data = decompressor.Result;
+        for (int i = 0; i < token_count; ++i) {
+            uint32_t original_word = 0;
+            for (int j = 0; j < token_bytes; ++j) {
+                original_word |= original_data[i * token_bytes + j] << (j * 8);
+            }
 
-        std::vector<uint8_t> decompressed_data_u8(decompressed_data.size());
-        for (uint32_t i = 0; i < decompressed_data.size(); ++i) {
-            decompressed_data_u8[i] = static_cast<uint8_t>(decompressed_data[i]);
-        }
-
-        // Check if the decompressed data matches the original data
-        if (!AreVectorsEqual(original_data, decompressed_data_u8)) {
-            LOG_ERROR() << "TestCompressDecompressByteStride: Decompressed data does not match the original for byte_stride " << byte_stride;
-            return false;
+            if (original_word != (uint32_t)decompressor.Result[i]) {
+                LOG_ERROR() << "TestCompressDecompressByteStride: Mismatch for token_bytes="
+                    << token_bytes << " at offset " << i;
+                return false;
+            }
         }
     }
 
