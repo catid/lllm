@@ -228,10 +228,10 @@ void TokenizedDataLoader::Stop()
 }
 
 void TokenizedDataLoader::StartEpoch(
-    uint64_t seed0,
-    uint64_t seed1,
+    uint64_t seed0, uint64_t seed1,
     uint32_t micro_batch_size,
-    uint32_t context_size)
+    uint32_t context_size,
+    uint32_t start_step)
 {
     LOG_INFO() << "Epoch shuffling " << micro_batch_size << " microbatches of " << context_size << " tokens each";
 
@@ -275,7 +275,12 @@ void TokenizedDataLoader::StartEpoch(
     // Wait for shuffles to complete before prefilling
     pool_.WaitForTasks();
 
-    Prefill();
+    if (start_step > 0) {
+        LOG_INFO() << "Resuming training from step " << start_step;
+        Skip(start_step);
+    } else {
+        Prefill();
+    }
 }
 
 void TokenizedDataLoader::ResetPrefill()
@@ -333,6 +338,11 @@ void TokenizedDataLoader::Prefill() {
         output_used_[batch_index] = 0;
     }
 
+    PostRequests(continuations, requests);
+}
+
+void TokenizedDataLoader::PostRequests(int continuations, const std::vector<ReadRequest>& requests)
+{
     if (requests.empty()) {
         if (continuations == 0) {
             LOG_INFO() << "Prepared dataset files contain no more data";
@@ -401,6 +411,9 @@ void TokenizedDataLoader::Prefill() {
 
                 total_decompressed_tokens_ += decompressor->Result.size();
 
+                // This is used only for skipping
+                output_used_[request.batch_index] = request.offset;
+
                 //LOG_INFO() << "Decompressed " << decompressor->Result.size() << " bytes from " << cbytes << " for shard=" << request.shard_index << " index=" << request.shard_span_index << " offset=" << offset;
 
                 uint32_t remaining = --prefill_inflight_;
@@ -442,6 +455,53 @@ bool TokenizedDataLoader::NextSpan(ReadRequest& request) {
 
     // Data exhausted
     return false;
+}
+
+bool TokenizedDataLoader::Skip(int steps)
+{
+    std::vector<int> available(micro_batch_size_);
+    std::vector<ReadRequest> requests(micro_batch_size_);
+
+    for (int i = 0; i < steps; ++i)
+    {
+        for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index)
+        {
+            ReadRequest& request = requests[batch_index];
+            request.batch_index = batch_index;
+
+            request.offset += context_size_;
+
+            const int remaining = available[batch_index] - request.offset;
+            if (remaining > 0) {
+                continue;
+            }
+
+            if (!NextSpan(request)) {
+                available[batch_index] = 0;
+                break; // No more data to read
+            }
+
+            uint64_t offset = 0;
+            uint32_t cbytes = 0, original_tokens = 0;
+            bool r = shards_[request.shard_index]->GetSpan(
+                request.shard_span_index,
+                offset,
+                cbytes,
+                original_tokens);
+            if (!r) {
+                LOG_ERROR() << "Failed to read span " << request.shard_span_index
+                    << " from shard " << request.shard_index;
+                return false;
+            }
+
+            available[batch_index] = original_tokens;
+            request.offset = context_size_;
+        }
+    }
+
+    PostRequests(0, requests);
+
+    return true;
 }
 
 bool TokenizedDataLoader::WaitUntilDataReady() {

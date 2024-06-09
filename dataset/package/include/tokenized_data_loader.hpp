@@ -50,6 +50,7 @@ struct ReadRequest {
     uint32_t batch_index = 0;
     uint32_t shard_index = 0;
     uint32_t shard_span_index = 0;
+    uint32_t offset = 0;
 };
 
 
@@ -134,11 +135,15 @@ public:
         This means that shorter data shards are completed first, so it
         is not fully uniformly selecting each datum.  But our end goal is
         to implement RHO-loss, so this is fine for now.
+
+        start_step is used to resume training from a checkpoint.
+        One step = One GetTokenArray() call.
     */
     void StartEpoch(
         uint64_t seed0, uint64_t seed1, // random seed for shuffling (synchronzed between nodes)
         uint32_t micro_batch_size, // max size of a microbatch
-        uint32_t context_size); // max size of a context
+        uint32_t context_size, // max size of a context
+        uint32_t start_step = 0); // start step for the epoch
 
     // Pause until all data from the current microbatch is ready.
     bool WaitUntilDataReady();
@@ -205,6 +210,10 @@ private:
 
     // Returns false if there is no more data to read.
     bool NextSpan(ReadRequest& request);
+
+    bool Skip(int steps);
+
+    void PostRequests(int continuations, const std::vector<ReadRequest>& requests);
 };
 
 
