@@ -119,49 +119,78 @@ def get_file_list(dataset_user, dataset_name):
     return files
 
 def clone_and_move_file(file_path, temp_dir, dataset_user, dataset_name):
-    start_time = time.time()
+    try:
+        start_time = time.time()
 
-    dst_file_path = os.path.join(temp_dir, file_path)
-    if os.path.exists(dst_file_path):
-        print(f"File {dst_file_path} already exists. Skipping...")
+        dst_file_path = os.path.join(temp_dir, file_path)
+        if os.path.exists(dst_file_path):
+            print(f"File {dst_file_path} already exists. Skipping...")
+            return dst_file_path
+        os.makedirs(os.path.dirname(dst_file_path), exist_ok=True)
+        
+        try:
+            # Initialize the Git repository
+            repo = git.Repo.init(temp_dir)
+        except Exception as e:
+            print(f"Error initializing Git repository: {e}")
+            return None
+
+        try:
+            # Enable sparse-checkout
+            sparse_checkout_path = os.path.join(temp_dir, '.git', 'info', 'sparse-checkout')
+            with open(sparse_checkout_path, 'w') as f:
+                f.write(file_path + '\n')
+        except Exception as e:
+            print(f"Error setting up sparse checkout: {e}")
+            return None
+
+        try:
+            # Set the config for sparse checkout
+            repo.git.config('core.sparseCheckout', 'true')
+        except Exception as e:
+            print(f"Error configuring sparse checkout: {e}")
+            return None
+
+        try:
+            # Add the remote repository
+            REPO_URL = f"https://huggingface.co/datasets/{dataset_user}/{dataset_name}.git"
+            origin = repo.create_remote('origin', REPO_URL)
+        except Exception as e:
+            print(f"Error adding remote repository: {e}")
+            return None
+
+        try:
+            # Fetch and checkout the specific file
+            origin.fetch()
+            repo.git.checkout('main')
+        except Exception as e:
+            print(f"Error fetching and checking out file: {e}")
+            return None
+
+        try:
+            # Move the file to the output directory
+            src_file_path = os.path.join(temp_dir, file_path)
+            shutil.move(src_file_path, dst_file_path)
+        except Exception as e:
+            print(f"Error moving file: {e}")
+            return None
+
+        try:
+            # Calculate and print the download speed
+            end_time = time.time()
+            file_size = os.path.getsize(dst_file_path)  # File size in bytes
+            download_time = end_time - start_time  # Time in seconds
+            download_speed = file_size / download_time / (1000 * 1000) # Speed in MB/s
+
+            print(f"\nDownloaded {dst_file_path}: {download_speed:.2f} MB/s ({file_size/1000000.0:.2f} MB)")
+        except Exception as e:
+            print(f"Error calculating download speed: {e}")
+            return None
+
         return dst_file_path
-    os.makedirs(os.path.dirname(dst_file_path), exist_ok=True)
-
-    # Initialize the Git repository
-    repo = git.Repo.init(temp_dir)
-
-    # Enable sparse-checkout
-    sparse_checkout_path = os.path.join(temp_dir, '.git', 'info', 'sparse-checkout')
-    with open(sparse_checkout_path, 'w') as f:
-        f.write(file_path + '\n')
-
-    # Set the config for sparse checkout
-    repo.git.config('core.sparseCheckout', 'true')
-
-    # Add the remote repository
-    REPO_URL = f"https://huggingface.co/datasets/{dataset_user}/{dataset_name}.git"
-    origin = repo.create_remote('origin', REPO_URL)
-
-    # Fetch and checkout the specific file
-    origin.fetch()
-    repo.git.checkout('main')
-
-    # Move the file to the output directory
-    src_file_path = os.path.join(temp_dir, file_path)
-    shutil.move(src_file_path, dst_file_path)
-
-    # Calculate and print the download speed
-    end_time = time.time()
-    file_size = os.path.getsize(dst_file_path)  # File size in bytes
-    download_time = end_time - start_time  # Time in seconds
-    download_speed = file_size / download_time / (1000 * 1000) # Speed in MB/s
-
-    if file_size == 0:
+    except Exception as e:
+        print(f"Unexpected error: {e}")
         return None
-
-    print(f"\nDownloaded {dst_file_path}: {download_speed:.2f} MB/s ({file_size/1000000.0:.2f} MB)")
-
-    return dst_file_path
 
 def download_worker(filename_queue, download_queue, args):
     curdir = os.curdir
