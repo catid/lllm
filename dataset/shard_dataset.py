@@ -37,7 +37,7 @@ def split_array(arr, max_size=4):
         i += len(sub_arr)
     return result
 
-def read_parquet_file(file_path, queue):
+def read_parquet_file(temp_dir, file_path, queue):
     try:
         #logger.info(f"Reading {file_path}...")
 
@@ -55,24 +55,24 @@ def read_parquet_file(file_path, queue):
                 for row in rows:
                     queue.put(row)
 
-        temp_dir = os.path.dirname(file_path)
-        shutil.rmtree(temp_dir)
-        logger.info(f"Deleted temporary directory: {temp_dir}")
-
     except Exception as e:
         logger.info(f"Error processing {file_path}: {e}")
         queue.put(None)
+
+    finally:
+        shutil.rmtree(temp_dir)
+        #logger.info(f"Deleted temporary directory: {temp_dir}")
 
 def read_parquet_files(total_files, download_queue, queue):
     processed_files = 0
     start_time = time.time()
 
     while True:
-        file_path = download_queue.get()
-        if file_path is None:
+        temp_dir, file_path = download_queue.get()
+        if temp_dir is None:
             break
 
-        read_parquet_file(file_path, queue)
+        read_parquet_file(temp_dir, file_path, queue)
         processed_files += 1
         print_progress_bar(processed_files, total_files, start_time)
 
@@ -185,7 +185,7 @@ def clone_and_move_file(file_path, temp_dir, dataset_user, dataset_name):
             download_time = end_time - start_time  # Time in seconds
             download_speed = file_size / download_time / (1000 * 1000) # Speed in MB/s
 
-            logger.info(f"\nDownloaded {dst_file_path}: {download_speed:.2f} MB/s ({file_size/1000000.0:.2f} MB)")
+            logger.info(f"Downloaded {dst_file_path}: {download_speed:.2f} MB/s ({file_size/1000000.0:.2f} MB)")
         except Exception as e:
             logger.info(f"Error calculating download speed: {e}")
             return None
@@ -218,7 +218,8 @@ def download_worker(filename_queue, download_queue, args):
                 shutil.rmtree(temp_dir)
                 continue
 
-            download_queue.put(dst_file_path)
+            item = (temp_dir, dst_file_path)
+            download_queue.put(item)
 
 def main():
     parser = argparse.ArgumentParser(description="Read and process shards of a Parquet file.")
