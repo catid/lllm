@@ -1,18 +1,15 @@
 import os
 import glob
 import argparse
-import pyarrow.dataset as ds
 import pyarrow.parquet as pq
-import pyarrow as pa
 from multiprocessing import Process, Queue
-import sys
 import time
 import tiktoken
 from cpp_dataloader import DataPreparation
 import shutil
-import tempfile
 import torch
 import yaml
+import shutil
 
 def save_args_to_yaml(args, additional_keys=None):
     args_dict = vars(args)
@@ -107,6 +104,11 @@ def tokenizer_worker(encoding, queue, output_queue):
         tokenized_text = tokenizer.encode(text, disallowed_special=())
         output_queue.put(tokenized_text)
 
+def delete_folder_contents(folder_path):
+    if os.path.exists(folder_path):
+        shutil.rmtree(folder_path)
+    os.makedirs(folder_path, exist_ok=True)
+
 def main():
     parser = argparse.ArgumentParser(description="Read and process shards of a Parquet file.")
     parser.add_argument('--dataset_dir', type=str, default="/mnt/Media/datasets/fineweb-edu", help="Path to the Parquet files.")
@@ -123,7 +125,7 @@ def main():
     if args.rank_count != torch.cuda.device_count():
         raise RuntimeError("Your --rank_count parameter must match the number of GPUs.  Check your `hosts.txt` file configuration.")
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    delete_folder_contents(args.output_dir)
 
     # Write some extra keys to the args file
 
