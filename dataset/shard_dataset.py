@@ -11,6 +11,9 @@ import yaml
 import tiktoken
 from cpp_dataloader import DataPreparation
 import torch
+from logger_tt import setup_logging, logger
+
+setup_logging(use_multiprocessing="fork")
 
 def save_args_to_yaml(args, additional_keys=None):
     args_dict = vars(args)
@@ -23,7 +26,7 @@ def save_args_to_yaml(args, additional_keys=None):
     with open(args_file, 'w') as f:
         yaml.dump(args_dict, f, default_flow_style=False)
     
-    print(f"Arguments saved to {args_file}")
+    logger.info(f"Arguments saved to {args_file}")
 
 def split_array(arr, max_size=4):
     result = []
@@ -36,7 +39,7 @@ def split_array(arr, max_size=4):
 
 def read_parquet_file(file_path, queue):
     try:
-        #print(f"Reading {file_path}...")
+        #logger.info(f"Reading {file_path}...")
 
         pfile = pq.ParquetFile(file_path)
 
@@ -54,10 +57,10 @@ def read_parquet_file(file_path, queue):
 
         temp_dir = os.path.dirname(file_path)
         shutil.rmtree(temp_dir)
-        print(f"Deleted temporary directory: {temp_dir}")
+        logger.info(f"Deleted temporary directory: {temp_dir}")
 
     except Exception as e:
-        print(f"Error processing {file_path}: {e}")
+        logger.info(f"Error processing {file_path}: {e}")
         queue.put(None)
 
 def read_parquet_files(total_files, download_queue, queue):
@@ -83,7 +86,7 @@ def print_progress_bar(iteration, total, start_time, bar_length=40):
     eta_str = time.strftime("%H:%M:%S", time.gmtime(eta))
     bar_filled = int(bar_length * iteration // total)
     bar = '#' * bar_filled + '-' * (bar_length - bar_filled)
-    print(f"[{bar}] {elapsed_time_str} / {eta_str} {percent}%")
+    logger.info(f"[{bar}] {elapsed_time_str} / {eta_str} {percent}%")
 
 def tokenizer_worker(encoding, queue, output_queue):
     tokenizer = tiktoken.get_encoding(encoding)
@@ -114,7 +117,7 @@ def get_file_list(dataset_user, dataset_name):
             if file.startswith("data/"):
                 files.append(file)
     else:
-        print(f"Error fetching data: {response.status_code}")
+        logger.info(f"Error fetching data: {response.status_code}")
 
     return files
 
@@ -124,7 +127,7 @@ def clone_and_move_file(file_path, temp_dir, dataset_user, dataset_name):
 
         dst_file_path = os.path.join(temp_dir, file_path)
         if os.path.exists(dst_file_path):
-            print(f"File {dst_file_path} already exists. Skipping...")
+            logger.info(f"File {dst_file_path} already exists. Skipping...")
             return dst_file_path
         os.makedirs(os.path.dirname(dst_file_path), exist_ok=True)
         
@@ -132,7 +135,7 @@ def clone_and_move_file(file_path, temp_dir, dataset_user, dataset_name):
             # Initialize the Git repository
             repo = git.Repo.init(temp_dir)
         except Exception as e:
-            print(f"Error initializing Git repository: {e}")
+            logger.info(f"Error initializing Git repository: {e}")
             return None
 
         try:
@@ -141,14 +144,14 @@ def clone_and_move_file(file_path, temp_dir, dataset_user, dataset_name):
             with open(sparse_checkout_path, 'w') as f:
                 f.write(file_path + '\n')
         except Exception as e:
-            print(f"Error setting up sparse checkout: {e}")
+            logger.info(f"Error setting up sparse checkout: {e}")
             return None
 
         try:
             # Set the config for sparse checkout
             repo.git.config('core.sparseCheckout', 'true')
         except Exception as e:
-            print(f"Error configuring sparse checkout: {e}")
+            logger.info(f"Error configuring sparse checkout: {e}")
             return None
 
         try:
@@ -156,7 +159,7 @@ def clone_and_move_file(file_path, temp_dir, dataset_user, dataset_name):
             REPO_URL = f"https://huggingface.co/datasets/{dataset_user}/{dataset_name}.git"
             origin = repo.create_remote('origin', REPO_URL)
         except Exception as e:
-            print(f"Error adding remote repository: {e}")
+            logger.info(f"Error adding remote repository: {e}")
             return None
 
         try:
@@ -164,7 +167,7 @@ def clone_and_move_file(file_path, temp_dir, dataset_user, dataset_name):
             origin.fetch()
             repo.git.checkout('main')
         except Exception as e:
-            print(f"Error fetching and checking out file: {e}")
+            logger.info(f"Error fetching and checking out file: {e}")
             return None
 
         try:
@@ -172,24 +175,24 @@ def clone_and_move_file(file_path, temp_dir, dataset_user, dataset_name):
             src_file_path = os.path.join(temp_dir, file_path)
             shutil.move(src_file_path, dst_file_path)
         except Exception as e:
-            print(f"Error moving file: {e}")
+            logger.info(f"Error moving file: {e}")
             return None
 
         try:
-            # Calculate and print the download speed
+            # Calculate and logger.info the download speed
             end_time = time.time()
             file_size = os.path.getsize(dst_file_path)  # File size in bytes
             download_time = end_time - start_time  # Time in seconds
             download_speed = file_size / download_time / (1000 * 1000) # Speed in MB/s
 
-            print(f"\nDownloaded {dst_file_path}: {download_speed:.2f} MB/s ({file_size/1000000.0:.2f} MB)")
+            logger.info(f"\nDownloaded {dst_file_path}: {download_speed:.2f} MB/s ({file_size/1000000.0:.2f} MB)")
         except Exception as e:
-            print(f"Error calculating download speed: {e}")
+            logger.info(f"Error calculating download speed: {e}")
             return None
 
         return dst_file_path
     except Exception as e:
-        print(f"Unexpected error: {e}")
+        logger.info(f"Unexpected error: {e}")
         return None
 
 def download_worker(filename_queue, download_queue, args):
@@ -203,7 +206,7 @@ def download_worker(filename_queue, download_queue, args):
         while True:
             temp_dir = tempfile.mkdtemp()
 
-            print(f"Downloading {file_path} -> {temp_dir}")
+            logger.info(f"Downloading {file_path} -> {temp_dir}")
 
             os.chdir(temp_dir)
 
@@ -248,7 +251,7 @@ def main():
     save_args_to_yaml(args, extra_keys)
 
     if args.just_args:
-        print("Just wrote the args file. Exiting.")
+        logger.info("Just wrote the args file. Exiting.")
         return
 
     data_prep = DataPreparation(args.output_dir, byte_tokens=args.byte_tokens)
@@ -264,7 +267,7 @@ def main():
     shard_file_paths = file_paths[start_index:end_index]
     shard_file_count = len(shard_file_paths)
 
-    print(f"\nDownloading {len(shard_file_paths)} files (shard {start_index}-{end_index})...")
+    logger.info(f"Downloading {len(shard_file_paths)} files (shard {start_index}-{end_index})...")
 
     filename_queue = Queue()
     download_queue = Queue(maxsize=2)
@@ -300,7 +303,7 @@ def main():
 
         data_prep.write_tokens(tokenized_text)
 
-    print(f"\nWaiting for download processes to finish...\n")
+    logger.info(f"\nWaiting for download processes to finish...\n")
 
     # Ensure all worker processes have finished
     for p in download_pool:
@@ -308,7 +311,7 @@ def main():
     for p in download_pool:
         p.join()
 
-    print(f"\nWaiting for tokenizer processes to finish...\n")
+    logger.info(f"\nWaiting for tokenizer processes to finish...\n")
 
     # Ensure all worker processes have finished
     for p in pool:
@@ -316,15 +319,15 @@ def main():
     for p in pool:
         p.join()
 
-    print(f"\nWaiting for parquet reader to finish...\n")
+    logger.info(f"\nWaiting for parquet reader to finish...\n")
 
     process.join()
 
-    print(f"\nWaiting for dataset preparation to finish...\n")
+    logger.info(f"\nWaiting for dataset preparation to finish...\n")
 
     data_prep.destroy()
 
-    print("\nProcessing complete.")
+    logger.info("\nProcessing complete.")
 
 if __name__ == "__main__":
     main()
