@@ -49,16 +49,16 @@ bool DataShardContext::Open(
     const uint32_t index_version = span_data[index_file_bytes - kIndexEndBytes + 4];
     const uint32_t index_token_bytes = span_data[index_file_bytes - kIndexEndBytes + 5];
 
-    if (data_file_bytes != data_reader->GetSize()) {
-        LOG_ERROR() << "Data file size mismatch: expected " << data_file_bytes << ", found " << data_reader->GetSize();
-        return false;
-    }
     if (index_version != DATALOADER_VERSION) {
         LOG_ERROR() << "Index file version mismatch: expected " << DATALOADER_VERSION << ", found " << index_version;
         return false;
     }
     if (token_bytes != index_token_bytes) {
         LOG_ERROR() << "Index file token_bytes mismatch: expected " << token_bytes << ", found " << index_token_bytes;
+        return false;
+    }
+    if (data_file_bytes + kDataEndBytes != data_reader->GetSize()) {
+        LOG_ERROR() << "Data file size mismatch: expected " << data_file_bytes + kDataEndBytes << ", found " << data_reader->GetSize();
         return false;
     }
 

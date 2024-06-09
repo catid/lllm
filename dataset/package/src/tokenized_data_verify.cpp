@@ -26,12 +26,13 @@ bool verify_files(
 
     const char* index_data = reinterpret_cast<const char*>(index_reader.GetData());
     size_t index_size = index_reader.GetSize();
-    uint64_t index_data_size = read_uint32_le(index_data + index_size - 14);
-    uint32_t index_version = static_cast<uint8_t>( index_data[index_size - 10] );
-    uint32_t index_token_bytes = static_cast<uint8_t>( index_data[index_size - 9] );
-    uint64_t index_hash = read_uint64_le(index_data + index_size - 8);
-    index_hash ^= CityHash64(index_data, kIndexRecordBytes);
-    size_t record_count = (index_size - 8) / kIndexRecordBytes;
+    const char* index_end = index_data + index_size - kIndexEndBytes;
+    uint64_t index_data_size = read_uint32_le(index_end);
+    uint32_t index_version = static_cast<uint8_t>( index_end[4] );
+    uint32_t index_token_bytes = static_cast<uint8_t>( index_end[5] );
+    uint64_t index_hash = read_uint64_le(index_end + kIndexEndBytes - 8);
+    index_hash ^= CityHash64(index_end, kIndexEndBytes - 8);
+    size_t record_count = (index_size - kIndexEndBytes) / kIndexRecordBytes;
 
     if (DATALOADER_VERSION != index_version) {
         LOG_ERROR() << "Index file version mismatch: expected " << DATALOADER_VERSION << ", found " << index_version;
@@ -50,9 +51,11 @@ bool verify_files(
 
     const char* data_data = reinterpret_cast<const char*>(data_reader.GetData());
     size_t data_size = data_reader.GetSize();
-    uint32_t data_version = static_cast<uint8_t>( data_data[data_size - 10] );
-    uint32_t data_token_bytes = static_cast<uint8_t>( data_data[data_size - 9] );
-    uint64_t data_hash = read_uint64_le(data_data + data_size - 8);
+    const char* data_end = data_data + data_size - kDataEndBytes;
+    uint32_t data_version = static_cast<uint8_t>( data_end[0] );
+    uint32_t data_token_bytes = static_cast<uint8_t>( data_end[1] );
+    uint64_t data_hash = read_uint64_le(data_end + kDataEndBytes - 8);
+    data_hash ^= CityHash64(data_end, kIndexEndBytes - 8);
 
     if (DATALOADER_VERSION != data_version) {
         LOG_ERROR() << "Data file version mismatch: expected " << DATALOADER_VERSION << ", found " << data_version;
@@ -62,15 +65,15 @@ bool verify_files(
         LOG_ERROR() << "Data file token_bytes mismatch: expected " << token_bytes << ", found " << data_token_bytes;
         return false;
     }
-    if (index_data_size != data_size) {
-        LOG_ERROR() << "Data file size mismatch: expected " << index_data_size << ", found " << data_size;
+    if (index_data_size + kDataEndBytes != data_size) {
+        LOG_ERROR() << "Data file size mismatch: expected " << index_data_size + kDataEndBytes << ", found " << data_size;
         return false;
     }
 
-    for (size_t i = 1; i < record_count; ++i) {
+    for (size_t i = 0; i < record_count; ++i) {
         const char* index_ptr = index_data + i * kIndexRecordBytes;
-        uint32_t start = read_uint32_le(index_ptr - kIndexRecordBytes);
-        uint32_t end = read_uint32_le(index_ptr);
+        uint32_t start = read_uint32_le(index_ptr);
+        uint32_t end = read_uint32_le(index_ptr + kIndexRecordBytes);
         //uint32_t original_bytes = read_uint32_le(index_ptr + 4);
         if (end <= start) {
             LOG_INFO() << "Offset end <= start: Entry " << i;
