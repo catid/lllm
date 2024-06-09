@@ -41,6 +41,7 @@
 #include "mapped_file.hpp"
 #include "uring_file.hpp"
 #include "worker_pool.hpp"
+#include "yaml_parser.hpp"
 
 //------------------------------------------------------------------------------
 // ReadRequest
@@ -49,19 +50,6 @@ struct ReadRequest {
     uint32_t batch_index = 0;
     uint32_t shard_index = 0;
     uint32_t shard_span_index = 0;
-};
-
-
-//------------------------------------------------------------------------------
-// GlobalIndexYaml
-
-struct GlobalIndexYaml {
-    bool Read(const std::string& data_folder_path);
-
-    int version_ = 0;
-    int token_bytes_ = 0;
-
-    std::vector<std::string> data_files_, index_files_;
 };
 
 
