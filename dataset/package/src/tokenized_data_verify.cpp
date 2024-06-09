@@ -142,6 +142,9 @@ bool VerifyDataset(const std::string& data_folder_path)
             if (!verify_files(index_file_path, data_file_path, token_bytes)) {
                 data_error = true;
             }
+            if (data_error) {
+                return;
+            }
             const int count = files_verified++;
             if (count % 10 == 1) {
                 uint64_t t1 = GetNsec();
