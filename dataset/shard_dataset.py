@@ -37,7 +37,7 @@ def split_array(arr, max_size=4):
         i += len(sub_arr)
     return result
 
-def read_parquet_file(temp_dir, file_path, queue):
+def read_parquet_file(temp_dir, file_path, tokenizer_queue):
     try:
         #logger.info(f"Reading {file_path}...")
 
@@ -53,17 +53,17 @@ def read_parquet_file(temp_dir, file_path, queue):
                 rows = group.to_pylist()
 
                 for row in rows:
-                    queue.put(row)
+                    tokenizer_queue.put(row)
 
     except Exception as e:
         logger.info(f"Error processing {file_path}: {e}")
-        queue.put(None)
+        tokenizer_queue.put(None)
 
     finally:
         shutil.rmtree(temp_dir)
         #logger.info(f"Deleted temporary directory: {temp_dir}")
 
-def read_parquet_files(total_files, download_queue, queue):
+def read_parquet_files(total_files, download_queue, tokenizer_queue):
     processed_files = 0
     start_time = time.time()
 
@@ -72,11 +72,12 @@ def read_parquet_files(total_files, download_queue, queue):
         if temp_dir is None:
             break
 
-        read_parquet_file(temp_dir, file_path, queue)
+        read_parquet_file(temp_dir, file_path, tokenizer_queue)
         processed_files += 1
         print_progress_bar(processed_files, total_files, start_time)
 
-    queue.put(None)
+    logger.info(f"Finished reading {processed_files} files.  Putting sentinel value in queue...")
+    tokenizer_queue.put(None)
 
 def print_progress_bar(iteration, total, start_time, bar_length=40):
     percent = f"{100 * (iteration / float(total)):.1f}"
@@ -94,6 +95,7 @@ def tokenizer_worker(encoding, queue, output_queue):
     while True:
         text = queue.get()
         if text is None:
+            logger.info(f"Sentinel value received in tokenizer worker.  Putting sentinel value in output queue...")
             output_queue.put(None)
             break
 
@@ -220,6 +222,10 @@ def download_worker(filename_queue, download_queue, args):
 
             item = (temp_dir, dst_file_path)
             download_queue.put(item)
+            break
+
+    logger.info(f"File list complete.  Putting sentinel value in download queue...")
+    download_queue.put((None, None))
 
 def main():
     parser = argparse.ArgumentParser(description="Read and process shards of a Parquet file.")
@@ -284,39 +290,41 @@ def main():
         p.start()
         download_pool.append(p)
 
-    queue = Queue(maxsize=128)
-    process = Process(target=read_parquet_files, args=(shard_file_count, download_queue, queue))
+    tokenizer_queue = Queue(maxsize=128)
+    process = Process(target=read_parquet_files, args=(shard_file_count, download_queue, tokenizer_queue))
     process.start()
 
     out_queue = Queue(maxsize=128)
 
     # Create a pool of tokenizer worker processes
     pool = []
-    for _ in range(16):
-        p = Process(target=tokenizer_worker, args=(args.encoding, queue, out_queue))
+    for _ in range(4):
+        p = Process(target=tokenizer_worker, args=(args.encoding, tokenizer_queue, out_queue))
         p.start()
         pool.append(p)
 
     while True:
         tokenized_text = out_queue.get()
         if tokenized_text is None:  # Check for the sentinel value
+            logger.info(f"Sentinel value received in data prep worker.  Breaking out of main loop...")
             break
 
         data_prep.write_tokens(tokenized_text)
 
-    logger.info(f"\nWaiting for download processes to finish...\n")
+    logger.info(f"\nStarting shutdown...\n")
 
-    # Ensure all worker processes have finished
     for p in download_pool:
         filename_queue.put(None)
+    for p in pool:
+        tokenizer_queue.put(None)
+
+    logger.info(f"\nWaiting for download processes to finish...\n")
+
     for p in download_pool:
         p.join()
 
     logger.info(f"\nWaiting for tokenizer processes to finish...\n")
 
-    # Ensure all worker processes have finished
-    for p in pool:
-        queue.put(None)
     for p in pool:
         p.join()
 
