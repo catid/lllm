@@ -34,7 +34,7 @@ lib.data_loader_destroy.restype = None
 lib.data_loader_start_epoch.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
 lib.data_loader_start_epoch.restype = None
 
-lib.data_loader_get_micro_batch.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_uint8)]
+lib.data_loader_get_micro_batch.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
 lib.data_loader_get_micro_batch.restype = ctypes.c_bool
 
 # Data Preparation
@@ -73,16 +73,20 @@ class DataLoader:
     def get_micro_batch(self):
         micro_batch_size = ctypes.c_uint32()
         num_tokens = ctypes.c_uint32()
+        steps = ctypes.c_uint32()
+        total_steps = ctypes.c_uint32()
         output_array = np.empty((self.microbatch_size, self.context_size), dtype=np.int32)
         is_continuation = np.empty(self.microbatch_size, dtype=np.uint8)
         success = lib.data_loader_get_micro_batch(self.data_loader,
                                                   ctypes.byref(micro_batch_size),
                                                   ctypes.byref(num_tokens),
                                                   output_array.ctypes.data_as(ctypes.POINTER(ctypes.c_int32)),
-                                                  is_continuation.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)))
+                                                  is_continuation.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
+                                                  ctypes.byref(steps),
+                                                  ctypes.byref(total_steps))
         if not success or micro_batch_size.value <= 0 or num_tokens.value <= 0:
-            return None, None
-        return output_array[:micro_batch_size.value, :num_tokens.value], is_continuation[:micro_batch_size.value]
+            return None, None, None, None
+        return output_array[:micro_batch_size.value, :num_tokens.value], is_continuation[:micro_batch_size.value], steps.value, total_steps.value
 
 class DataPreparation:
     def __init__(self, data_folder_path, byte_tokens):

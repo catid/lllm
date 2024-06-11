@@ -47,10 +47,18 @@ bool data_loader_get_micro_batch(
     uint32_t* micro_batch_size,
     uint32_t* num_tokens,
     int32_t* output_batch,
-    uint8_t* is_continuation)
+    uint8_t* is_continuation,
+    uint32_t* step,
+    uint32_t* total_steps)
 {
     TokenizedDataLoader* loader = static_cast<TokenizedDataLoader*>(data_loader);
-    return loader->GetTokenArray(micro_batch_size, num_tokens, output_batch, is_continuation);
+    return loader->GetTokenArray(
+        micro_batch_size,
+        num_tokens,
+        output_batch,
+        is_continuation,
+        step,
+        total_steps);
 }
 
 

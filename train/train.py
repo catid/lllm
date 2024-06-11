@@ -3,7 +3,6 @@ import os
 from model.model import LatentLanguage, LatentLanguageConfig
 
 import torch
-import torch.nn as nn
 
 import numpy as np
 import random, time, json
@@ -12,15 +11,19 @@ import argparse
 import yaml
 
 import wandb
-import threading
 
-import deepspeed
-from deepspeed import comm
-from deepspeed import log_dist
-from deepspeed.runtime.config import DeepSpeedConfig
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.wrap import enable_wrap, wrap
+from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType, FullStateDictConfig, OptimStateDictConfig
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.distributed.fsdp.api import init_process_group
+
+import torch.distributed as dist
+
+dist.init_process_group(backend='nccl')
 
 from cpp_dataloader import DataLoader, DataVerifier
-#from mora import MoRALayer, merge_mora_weights, replace_linear_with_mora
+from mora import replace_linear_with_mora
 
 import schedulefree
 
@@ -76,7 +79,7 @@ def delete_folder_contents(folder_path):
 def train_one_step(optimizer, model_engine, dataloader):
     model_engine.train()
 
-    batch, is_cont = dataloader.get_micro_batch()
+    batch, is_cont, step, total_steps = dataloader.get_micro_batch()
 
     if batch is None:
         return None, None
@@ -125,6 +128,8 @@ def main(args, shard_config):
     cfg.n_vocab = shard_config["n_vocab"]
     cfg.block_size = args.context
     model = LatentLanguage(cfg)
+
+    model = replace_linear_with_mora(model)
 
     optimizer = schedulefree.AdamWScheduleFree(
         model.parameters(),

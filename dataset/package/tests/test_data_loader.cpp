@@ -34,6 +34,7 @@ bool test_data_loader() {
     loader.StartEpoch(seed0, seed1, k_micro_batch_size, k_context_size, k_start_step);
 
     uint64_t total_spans = 0;
+    uint32_t step = 0, total_steps = 0, actual_steps = 0;
 
     for (;;) {
         uint32_t micro_batch_size;
@@ -43,7 +44,7 @@ bool test_data_loader() {
 
         uint64_t t0 = GetNsec();
 
-        if (!loader.GetTokenArray(&micro_batch_size, &num_tokens, output_batch, is_continuation)) {
+        if (!loader.GetTokenArray(&micro_batch_size, &num_tokens, output_batch, is_continuation, &step, &total_steps)) {
             break;
         }
 
@@ -51,6 +52,7 @@ bool test_data_loader() {
         double dt_usec = (t1 - t0) / 1000.0;
 
         total_spans += micro_batch_size;
+        actual_steps++;
 
         LOG_INFO() << "Batch retrieved: micro_batch_size=" << micro_batch_size << ", num_tokens=" << num_tokens << ", dt_usec=" << dt_usec;
         //LOG_INFO() << "Sample data: " << output_batch[0] << " (continuation=" << (int)is_continuation[0] << ")";
@@ -61,6 +63,11 @@ bool test_data_loader() {
     LOG_INFO() << "Total spans processed: " << total_spans;
 
     loader.Stop();
+
+    if (actual_steps != total_steps) {
+        LOG_ERROR() << "Total spans and total steps do not match: " << actual_steps << " vs " << total_steps;
+        return false;
+    }
 
     if (total_spans == 0) {
         LOG_ERROR() << "Data loader did not produce any spans";
@@ -94,8 +101,9 @@ bool test_k_start_step(int steps) {
         uint32_t num_tokens;
         int32_t output_batch[k_micro_batch_size * k_context_size];
         uint8_t is_continuation[k_micro_batch_size];
+        uint32_t step, total_steps;
 
-        if (!loader1.GetTokenArray(&micro_batch_size, &num_tokens, output_batch, is_continuation)) {
+        if (!loader1.GetTokenArray(&micro_batch_size, &num_tokens, output_batch, is_continuation, &step, &total_steps)) {
             LOG_ERROR() << "Loader1 failed to get token array on step " << i;
             return false;
         }
@@ -108,7 +116,8 @@ bool test_k_start_step(int steps) {
     uint32_t num_tokens1;
     std::vector<int32_t> output_batch1(k_micro_batch_size * k_context_size);
     std::vector<uint8_t> is_continuation1(k_micro_batch_size);
-    if (!loader1.GetTokenArray(&micro_batch_size1, &num_tokens1, output_batch1.data(), is_continuation1.data())) {
+    uint32_t step1, total_steps1;
+    if (!loader1.GetTokenArray(&micro_batch_size1, &num_tokens1, output_batch1.data(), is_continuation1.data(), &step1, &total_steps1)) {
         LOG_ERROR() << "Loader1 failed to get token array on the 11th step";
         return false;
     }
@@ -125,7 +134,8 @@ bool test_k_start_step(int steps) {
     uint32_t num_tokens2;
     std::vector<int32_t> output_batch2(k_micro_batch_size * k_context_size);
     std::vector<uint8_t> is_continuation2(k_micro_batch_size);
-    if (!loader2.GetTokenArray(&micro_batch_size2, &num_tokens2, output_batch2.data(), is_continuation2.data())) {
+    uint32_t step2, total_steps2;
+    if (!loader2.GetTokenArray(&micro_batch_size2, &num_tokens2, output_batch2.data(), is_continuation2.data(), &step2, &total_steps2)) {
         LOG_ERROR() << "Loader2 failed to get token array with k_start_step = 10";
         return false;
     }
@@ -135,6 +145,10 @@ bool test_k_start_step(int steps) {
     loader2.Stop();
 
     // Compare the results
+    if (step1 != step2 || total_steps1 != total_steps2) {
+        LOG_ERROR() << "Steps and total steps do not match";
+        return false;
+    }
     if (micro_batch_size1 != micro_batch_size2 || num_tokens1 != num_tokens2 || 
         memcmp(output_batch1.data(), output_batch2.data(), output_batch1.size() * 4) != 0 || 
         memcmp(is_continuation1.data(), is_continuation2.data(), is_continuation1.size()) != 0) {

@@ -22,7 +22,7 @@ if __name__ == "__main__":
         
         prep = DataPreparation(data_path, byte_tokens=False)
         
-        for _ in range(4000):
+        for _ in range(8000):
             num_tokens = random.randint(1, 20000)
             tokens = [random.randint(0, 128000) for _ in range(num_tokens)]
             prep.write_tokens(tokens)
@@ -51,17 +51,17 @@ if __name__ == "__main__":
     print("Example usage of DataLoader")
     try:
         start_time = time.time()
-        
+
         loader = DataLoader(data_path, rank=0, local_ranks=2)
         loader.start_epoch(0, 0, 128, 8192)
 
         while True:
-            batch, is_cont = loader.get_micro_batch()
+            batch, is_cont, step, total_steps = loader.get_micro_batch()
             if batch is None:
                 print("Dataset exhausted")
                 break
-            print("Batch:", batch)
-            print("Is continuation:", is_cont)
+            print("Batch:", batch.shape)
+            print("Is continuation:", is_cont, ", Step:", step, ", Total steps:", total_steps)
 
         loader.destroy()
 

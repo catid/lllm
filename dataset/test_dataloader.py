@@ -32,7 +32,7 @@ def main(args, shard_config):
     t0 = time.time()
 
     while True:
-        batch, is_cont = dataloader.get_micro_batch()
+        batch, is_cont, step, total_steps = dataloader.get_micro_batch()
 
         if batch is None:
             break

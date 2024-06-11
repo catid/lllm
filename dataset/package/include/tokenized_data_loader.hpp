@@ -155,7 +155,9 @@ public:
         uint32_t* micro_batch_size, // output: batch size
         uint32_t* num_tokens, // output: number of tokens in the batch
         int32_t* output_batch, // output: tensor of tokens
-        uint8_t* is_continuation); // output: vector of bools, one for each batch
+        uint8_t* is_continuation, // output: vector of bools, one for each batch
+        uint32_t* step, // output: current step number
+        uint32_t* total_steps); // output: total number of steps in dataset
 
 private:
     // The rank of the current process and the number of local ranks
@@ -205,6 +207,9 @@ private:
     // several microbatches.  This variable tracks the progress.
     std::vector<uint32_t> output_used_;
 
+    uint32_t current_step_ = 0;
+    uint32_t total_steps_ = 0;
+
     void ResetPrefill();
     void Prefill();
 
@@ -214,6 +219,8 @@ private:
     bool Skip(int steps);
 
     void PostRequests(int continuations, const std::vector<ReadRequest>& requests);
+
+    void CalculateTotalSteps();
 };
 
 

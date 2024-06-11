@@ -230,6 +230,51 @@ void TokenizedDataLoader::Stop()
     global_index_yaml_ = nullptr;
 }
 
+void TokenizedDataLoader::CalculateTotalSteps()
+{
+    total_steps_ = 0;
+
+    std::vector<int> remaining(micro_batch_size_);
+
+    ReadRequest request;
+    for (;;) {
+        bool all_spans_exhausted = true;
+        for (uint32_t i = 0; i < micro_batch_size_; ++i) {
+            if (remaining[i] <= 0) {
+                if (NextSpan(request)) {
+                    uint64_t offset = 0;
+                    uint32_t cbytes = 0;
+                    uint32_t original_tokens = 0;
+                    bool span_okay = shards_[request.shard_index]->GetSpan(
+                        request.shard_span_index,
+                        offset,
+                        cbytes,
+                        original_tokens);
+                    if (span_okay) {
+                        remaining[i] = original_tokens;
+                    }
+                }
+            }
+            if (remaining[i] > 0) {
+                all_spans_exhausted = false;
+            }
+            remaining[i] -= context_size_;
+        }
+
+        if (!all_spans_exhausted) {
+            total_steps_++;
+        } else {
+            break;
+        }
+    }
+
+    // Reset state
+    next_shard_index_ = 0;
+    for (const auto& shard : shards_) {
+        shard->EpochNextSpan = 0;
+    }
+}
+
 void TokenizedDataLoader::StartEpoch(
     uint64_t seed0, uint64_t seed1,
     uint32_t micro_batch_size,
@@ -278,6 +323,9 @@ void TokenizedDataLoader::StartEpoch(
     // Wait for shuffles to complete before prefilling
     pool_.WaitForTasks();
 
+    // Calculate the total number of steps in the dataset
+    CalculateTotalSteps();
+
     if (start_step > 0) {
         LOG_INFO() << "Resuming training from step " << start_step;
         Skip(start_step);
@@ -292,6 +340,7 @@ void TokenizedDataLoader::ResetPrefill()
     prefill_inflight_ = 0;
     prefill_complete_ = false;
     prefill_started_ = false;
+    current_step_ = 0;
 
     // Resize to the number of prefill tasks
     decompressors_.resize(micro_batch_size_);
@@ -464,6 +513,8 @@ bool TokenizedDataLoader::NextSpan(ReadRequest& request) {
 
 bool TokenizedDataLoader::Skip(int steps)
 {
+    current_step_ = static_cast<uint32_t>(steps);
+
     std::vector<int> available(micro_batch_size_);
     std::vector<ReadRequest> requests(micro_batch_size_);
 
@@ -523,11 +574,20 @@ bool TokenizedDataLoader::GetTokenArray(
     uint32_t* micro_batch_out,
     uint32_t* max_tokens_out,
     int32_t* output_batch,
-    uint8_t* is_continuation)
+    uint8_t* is_continuation,
+    uint32_t* step_out,
+    uint32_t* total_steps_out)
 {
     if (!WaitUntilDataReady()) {
         LOG_DEBUG() << "Data did not become ready";
         return false;
+    }
+
+    if (step_out) {
+        *step_out = current_step_++;
+    }
+    if (total_steps_out) {
+        *total_steps_out = total_steps_;
     }
 
     if (worker_error_) {
@@ -584,8 +644,12 @@ bool TokenizedDataLoader::GetTokenArray(
         memset(is_continuation, 0, pad_rows);
     }
 
-    *micro_batch_out = num_rows;
-    *max_tokens_out = max_token_count;
+    if (micro_batch_out) {
+        *micro_batch_out = num_rows;
+    }
+    if (max_tokens_out) {
+        *max_tokens_out = max_token_count;
+    }
 
     if (num_rows == 0) {
         LOG_INFO() << "GetTokenArray: Training data exhausted.  Disk compression: " << (total_disk_read_ / total_decompressed_tokens_) << " bytes/token";
