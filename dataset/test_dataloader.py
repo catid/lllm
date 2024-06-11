@@ -21,6 +21,8 @@ def main(args, shard_config):
         if not is_valid:
             raise RuntimeError("Dataset is corrupted and must be regenerated using dataset/shard_dataset.py")
 
+    print(f"Reading dataset shard {args.rank} of {shard_config['rank_count']} ranks") 
+
     dataloader = DataLoader(args.dataset_dir, rank=args.rank, local_ranks=shard_config["rank_count"])
     if not dataloader:
         raise RuntimeError("DataLoader failed to initialize")
@@ -41,12 +43,12 @@ def main(args, shard_config):
             print(f"Batch: {batch.shape} is_cont={is_cont}")
 
         #print(f"Batch[0] = {batch[0][0]}")
-        print(f"Batch = {batch}")
+        #print(f"Batch = {batch}")
 
         total_microbatches += 1
 
         if total_microbatches % 5000 == 0:
-            print(f"Reading epoch data: {total_microbatches} microbatches...")
+            print(f"Reading epoch data: {total_microbatches} microbatches (step={step}/{total_steps} [{step * 100.0 / total_steps}%])...")
 
     t1 = time.time()
     dt = t1 - t0
@@ -60,8 +62,8 @@ if __name__ == "__main__":
     parser.add_argument("--dataset-dir", type=str, default="~/dataset_shard", help="Dataset directory")
     parser.add_argument("--verify-dataset", action="store_true", help="Verify the dataset before training")
     parser.add_argument("--rank", type=int, default=0, help="Rank to emulate")
-    parser.add_argument("--batch", type=int, default=4, help="Microbatch size")
-    parser.add_argument("--context", type=int, default=1024, help="Context size")
+    parser.add_argument("--batch", type=int, default=128, help="Microbatch size")
+    parser.add_argument("--context", type=int, default=8192, help="Context size")
     parser.add_argument("--seed0", type=int, default=1234, help="seed0")
     parser.add_argument("--seed1", type=int, default=5678, help="seed1")
 
