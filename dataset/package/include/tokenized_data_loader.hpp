@@ -47,10 +47,23 @@
 // ReadRequest
 
 struct ReadRequest {
+    // Which batch row this will go into
     uint32_t batch_index = 0;
+
+    // Offset where this data will be written in the batch row
+    uint32_t write_offset = 0;
+
+    // Number of tokens to write
+    uint32_t write_count = 0;
+
+    // Which shard (data file) to read from
     uint32_t shard_index = 0;
+
+    // Index of the span of compressed data to read
     uint32_t shard_span_index = 0;
-    uint32_t offset = 0;
+
+    // Number of tokens to skip in this read request
+    uint32_t skip = 0;
 };
 
 
@@ -138,11 +151,17 @@ public:
 
         start_step is used to resume training from a checkpoint.
         One step = One GetTokenArray() call.
+
+        max_end_padding: Maximum number of padding characters on the right of each batch row.
+        min_string_length: Minimum length of strings added to the batch.  This is used when
+        strings are broken up into pieces and the last piece is shorter than this length.
     */
     void StartEpoch(
         uint64_t seed0, uint64_t seed1, // random seed for shuffling (synchronzed between nodes)
         uint32_t micro_batch_size, // max size of a microbatch
         uint32_t context_size, // max size of a context
+        uint32_t max_end_padding, // concatenate short strings until there are fewer than this many padding characters at the end
+        uint32_t min_string_length, // minimum length of a string
         uint32_t start_step = 0); // start step for the epoch
 
     // Pause until all data from the current microbatch is ready.
@@ -164,6 +183,8 @@ private:
     uint32_t rank_ = 0;
     uint32_t local_ranks_ = 1;
     uint32_t token_bytes_ = 0;
+    uint32_t max_end_padding_ = 0;
+    uint32_t min_string_length_ = 0;
 
     // Is Stop() called?
     std::atomic<bool> Terminated = ATOMIC_VAR_INIT(false);

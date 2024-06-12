@@ -279,6 +279,8 @@ void TokenizedDataLoader::StartEpoch(
     uint64_t seed0, uint64_t seed1,
     uint32_t micro_batch_size,
     uint32_t context_size,
+    uint32_t max_end_padding,
+    uint32_t min_string_length,
     uint32_t start_step)
 {
     LOG_INFO() << "Epoch shuffling " << micro_batch_size << " microbatches of " << context_size << " tokens each";
@@ -289,6 +291,8 @@ void TokenizedDataLoader::StartEpoch(
 
     micro_batch_size_ = micro_batch_size;
     context_size_ = context_size;
+    max_end_padding_ = max_end_padding;
+    min_string_length_ = min_string_length;
 
     // Clear decompressor state etc
     ResetPrefill();
@@ -466,7 +470,7 @@ void TokenizedDataLoader::PostRequests(int continuations, const std::vector<Read
                 total_decompressed_tokens_ += decompressor->Result.size();
 
                 // This is used only for skipping
-                output_used_[request.batch_index] = request.offset;
+                output_used_[request.batch_index] = request.skip;
 
                 //LOG_INFO() << "Decompressed " << decompressor->Result.size() << " bytes from " << cbytes << " for shard=" << request.shard_index << " index=" << request.shard_span_index << " offset=" << offset;
 
@@ -513,6 +517,8 @@ bool TokenizedDataLoader::NextSpan(ReadRequest& request) {
 
 bool TokenizedDataLoader::Skip(int steps)
 {
+    // FIXME: This needs to be updated
+
     current_step_ = static_cast<uint32_t>(steps);
 
     std::vector<int> available(micro_batch_size_);
@@ -529,9 +535,9 @@ bool TokenizedDataLoader::Skip(int steps)
             ReadRequest& request = requests[batch_index];
             request.batch_index = batch_index;
 
-            request.offset += context_size_;
+            request.skip += context_size_;
 
-            const int remaining = available[batch_index] - request.offset;
+            const int remaining = available[batch_index] - request.skip;
             if (remaining > 0) {
                 continue;
             }
@@ -555,7 +561,7 @@ bool TokenizedDataLoader::Skip(int steps)
             }
 
             available[batch_index] = original_tokens;
-            request.offset = 0;
+            request.skip = 0;
         }
     }
 

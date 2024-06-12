@@ -28,7 +28,6 @@ Follow the instructions in the `train/` directory.
 * Produce 4 tokens at once using 4x MLP heads
 * VAR-style or diffusion style final block that predicts multiple tokens at once
 * Byte model
-* Share the majority of FFN weights between consecutive layers but only replace a few of them each time
 * Spend a layer to drop tokens at KV cache point (mask for second half) per token
 * Mixture of Depth (MoD)
 * RWKV-6 for first half, Mix GLA and 20% Full attention for second half of YOCO
@@ -38,11 +37,12 @@ Follow the instructions in the `train/` directory.
 
 * https://github.com/HazyResearch/ThunderKittens
 * Sharing FFN weights onion-style https://arxiv.org/abs/2104.06022
+* Share the majority of FFN weights between consecutive layers but only replace a few of them each time
 
+* DeltaNet retrieval heads: https://github.com/sustcsonglin/flash-linear-attention/blob/4929ae7370f99ca60ab1d6e3903ba91ca9d981f0/fla/layers/delta_net.py#L48
+https://arxiv.org/pdf/2406.06484
 
-FP16 training performance/watt:
-H100: 989 TFLOPS / 1275W = 0.78 TFLOPS/W
-B200: 2250 TFLOPS / 1788W = 1.26 TFLOPS/W
-Improvement in one year due to Nvidia hardware improvements: 60% better efficiency.
+* Attention as a Hypernetwork: https://arxiv.org/pdf/2406.05816
+https://github.com/smonsays/hypernetwork-attention
 
-Source: https://www.semianalysis.com/p/nvidia-blackwell-perf-tco-analysis
+* https://github.com/Dao-AILab/flash-attention/blob/0cb595ad943ac7539c49825f520659c0f61d4f40/flash_attn/bert_padding.py#L125

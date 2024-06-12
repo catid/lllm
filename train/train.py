@@ -5,7 +5,7 @@ from model.model import LatentLanguage, LatentLanguageConfig
 import torch
 
 import numpy as np
-import random, time, json
+import random, time
 import shutil
 import argparse
 import yaml
@@ -20,12 +20,16 @@ from torch.distributed.fsdp.api import init_process_group
 
 import torch.distributed as dist
 
-dist.init_process_group(backend='nccl')
+from torch.cuda.amp import GradScaler, autocast
 
 from cpp_dataloader import DataLoader, DataVerifier
 from mora import replace_linear_with_mora
 
 import schedulefree
+from logger_tt import setup_logging, logger
+
+setup_logging(use_multiprocessing="fork")
+
 
 # Enable cuDNN benchmarking to improve online performance
 torch.backends.cudnn.benchmark = True
@@ -34,14 +38,9 @@ torch.backends.cudnn.benchmark = True
 torch.autograd.profiler.emit_nvtx(False)
 torch.autograd.profiler.profile(False)
 
-# Deepspeed logging functions
-def log_0(msg):
-    log_dist(msg, ranks=[0])
-def log_all(msg):
-    log_dist(msg, ranks=[-1])
 
 def is_main_process():
-    return comm.get_rank() == 0
+    return dist.get_rank() == 0
 
 def get_true_random_32bit_positive_integer():
     random_bytes = bytearray(os.urandom(4))
@@ -60,7 +59,7 @@ def synchronize_seed(local_rank, rank, seed=-1):
 
     seed_tensor = seed_tensor.cuda(local_rank)
 
-    comm.broadcast(tensor=seed_tensor, src=0)
+    dist.broadcast(tensor=seed_tensor, src=0)
 
     seed = int(seed_tensor.item())
 
@@ -68,7 +67,7 @@ def synchronize_seed(local_rank, rank, seed=-1):
     np.random.seed(seed)
     random.seed(seed)
 
-    log_all(f"Using seed: {seed} for shard_id={rank}")
+    logger.info(f"Using seed: {seed} for shard_id={rank}")
     return seed
 
 def delete_folder_contents(folder_path):
@@ -118,11 +117,7 @@ def save_deepspeed_model_engine(model_engine, fp16, args):
 def main(args, shard_config):
     t0 = time.time()
 
-    # Initialize DeepSpeed
-    deepspeed.init_distributed(
-        dist_backend="nccl",
-        verbose="false"
-    )
+    dist.init_process_group(backend='nccl')
 
     cfg = LatentLanguageConfig()
     cfg.n_vocab = shard_config["n_vocab"]
@@ -136,25 +131,16 @@ def main(args, shard_config):
         lr=args.lr,
         weight_decay=args.weight_decay)
 
-    # Modify deepspeed configuration programmatically
-    with open(args.deepspeed_config) as f:
-        ds_config = json.load(f)
-
-    ds_config["fp16"]["enabled"] = not args.fp32
+    # FIXME
+    #ds_config["fp16"]["enabled"] = not args.fp32
 
     # Remove deepspeed_config from the args (we pass a dict into deepspeed.initialize)
     args.deepspeed_config = None
 
-    # DeepSpeed engine
-    model_engine, optimizer, _, _ = deepspeed.initialize(
-        args=args,
-        model=model,
-        optimizer=optimizer,
-        lr_scheduler=None, # We do not use LR schedulers
-        config=ds_config,
-        model_parameters=model.parameters())
+    model = FSDP(model)
 
-    log_0(f"Arguments: {args}")
+    if is_main_process():
+        logger.info(f"Arguments: {args}")
 
     if args.verify_dataset:
         log_all("Verifying dataset... (should take about one minute per 0.4T tokens using an SSD)")
