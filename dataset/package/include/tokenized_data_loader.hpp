@@ -1,30 +1,3 @@
-/*
-    Possible data loading options:
-
-    (1) Always run from first to last token in the dataset.
-
-        This is the default behavior for most training scripts.
-        It can be efficiently implemented using mmap.
-
-    (2) Load from random spans in the dataset. [We are here.]
-
-        This is the current implementation.
-        Instead of using mmap we skip the page cache and read
-        directly from disk using io_uring and IO_DIRECT.
-        It may not have any advantage over sequential access.
-
-        The spans written to the data file must match the context
-        size requested during training or else a random subset
-        will be selected, which wastes training tokens.
-
-    (3) Select a subset of the dataset to load.
-
-        This is the ideal implementation, which requires more work.
-        We need to nail down the selection criterion.
-        But in any case the access pattern will be random.
-        This is an important optimization for training.
-*/
-
 #pragma once
 
 #include <cstdint>
@@ -151,6 +124,18 @@ public:
 
         start_step is used to resume training from a checkpoint.
         One step = One GetTokenArray() call.
+
+        We concatenate short strings together so that there are fewer than
+        max_end_padding padding characters at the end of each batch row.
+        This allows us to process more tokens per batch.
+        More info here: https://github.com/Dao-AILab/flash-attention/issues/432
+
+        We break strings at whitespace where possible.
+
+        We remove strings that are shorter than min_string_length.
+        Very short strings may not be useful for training.
+        But it depends on your model.  Some models may keep state between
+        batches and can handle the short input.
 
         max_end_padding: Maximum number of padding characters on the right of each batch row.
         min_string_length: Minimum length of strings added to the batch.  This is used when
