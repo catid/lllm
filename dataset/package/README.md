@@ -1,9 +1,42 @@
 # C++ Dataloader
 
-Optimized C++ dataloader for dataset.
+Optimized C++ dataloader for tokenized datasets.
 
-The scripts convert downloaded HuggingFace datasets into this format by tokenizing the text into context-aligned batches and compressing each one into 4 GB files with an index to look up the pieces.  This also supports a hash to check the integrity of the data.
+Features:
+* All operations are fully pipelined with training and parallelized for speed.
+* Uses Zstd and byte planes to efficiently store any n_vocab size (including bytes), saving a ton of disk space.
+* Uses an index file to accelerate data lookup.
+* Hash to verify entire dataset integrity quickly.
+* Supports fast checkpoint resume by skipping ahead a specified number of steps.
+* Short strings are concatenated and separated by padding tokens to improve training throughput.
 
+
+## Example Usage
+
+From Python it looks like this:
+
+```python
+from cpp_dataloader import DataLoader, DataVerifier, EpochConfig
+
+loader = DataLoader(data_path)
+
+config = EpochConfig()
+config.local_rank = 0
+config.local_rank_count = 2
+config.padding_token = -1
+config.micro_batch_size = 128
+config.context_size = 8192
+config.min_data_length = 64
+config.start_step = 0
+
+loader.begin_epoch(config)
+
+while True:
+    batch, is_cont, step, total_steps = loader.get_micro_batch()
+    if batch is None:
+        print("Dataset exhausted")
+        break
+```
 
 ## Setup
 
