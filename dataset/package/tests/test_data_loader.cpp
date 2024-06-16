@@ -80,7 +80,7 @@ bool test_data_loader() {
     return true;
 }
 
-bool test_k_start_step(int steps) {
+bool test_k_start_step(int skip_steps) {
     TokenizedDataLoader loader1, loader2;
 
     if (!loader1.Start("test_data") || !loader2.Start("test_data")) {
@@ -97,10 +97,14 @@ bool test_k_start_step(int steps) {
     config.MicroBatchSize = k_micro_batch_size;
     config.ContextSize = k_context_size;
 
+    LOG_INFO() << "test_k_start_step: BEGIN EPOCH";
+
     loader1.BeginEpoch(config);
 
-    // Loader1: Advance 10 steps
-    for (int i = 0; i < steps; ++i) {
+    LOG_INFO() << "test_k_start_step: BEGUN EPOCH";
+
+    // Loader1: Advance N steps
+    for (int i = 0; i < skip_steps; ++i) {
         uint32_t micro_batch_size;
         uint32_t num_tokens;
         int32_t output_batch[k_micro_batch_size * k_context_size];
@@ -112,10 +116,10 @@ bool test_k_start_step(int steps) {
             return false;
         }
 
-        //LOG_INFO() << "Loader1 step " << i+1 << ": " << output_batch[0] << " - " << (int)is_continuation[0];
+        LOG_INFO() << "Loader1 step " << i+1 << ": " << output_batch[0] << " - " << (int)is_continuation[0];
     }
 
-    // Save the output of the 10th call
+    // Save the output of the final call
     uint32_t micro_batch_size1;
     uint32_t num_tokens1;
     std::vector<int32_t> output_batch1(k_micro_batch_size * k_context_size);
@@ -126,15 +130,19 @@ bool test_k_start_step(int steps) {
         return false;
     }
 
-    //LOG_INFO() << "Loader1 step next: " << output_batch1[0] << " - " << (int)is_continuation1[0];
+    LOG_INFO() << "Loader1 step next: " << output_batch1[0] << " - " << (int)is_continuation1[0];
 
     loader1.Stop();
 
     config.MicroBatchSize = k_micro_batch_size;
     config.ContextSize = k_context_size;
-    config.StartStep = steps;
+    config.StartStep = skip_steps;
 
-    loader1.BeginEpoch(config);
+    LOG_INFO() << "test_k_start_step: BEGIN EPOCH";
+
+    loader2.BeginEpoch(config);
+
+    LOG_INFO() << "test_k_start_step: BEGUN EPOCH";
 
     uint32_t micro_batch_size2;
     uint32_t num_tokens2;

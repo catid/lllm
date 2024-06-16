@@ -321,6 +321,8 @@ void TokenizedDataLoader::BeginEpoch(const EpochConfig& config)
         return;
     }
 
+    LOG_INFO() << "Data ready"; 
+
     // Clear decompressor state etc
     ResetPrefill();
 
