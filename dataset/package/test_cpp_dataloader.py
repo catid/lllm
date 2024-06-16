@@ -1,6 +1,6 @@
 import random
 import time
-from cpp_dataloader import DataLoader, DataPreparation, DataVerifier
+from cpp_dataloader import DataLoader, DataPreparation, DataVerifier, EpochConfig
 import os
 
 def create_folder_if_not_exists(folder_path):
@@ -52,8 +52,18 @@ if __name__ == "__main__":
     try:
         start_time = time.time()
 
-        loader = DataLoader(data_path, rank=0, local_ranks=2)
-        loader.begin_epoch(0, 0, 128, 8192)
+        loader = DataLoader(data_path)
+
+        config = EpochConfig()
+        config.local_rank = 0
+        config.local_rank_count = 2
+        config.padding_token = -1
+        config.micro_batch_size = 128
+        config.context_size = 8192
+        config.min_data_length = 64
+        config.start_step = 0
+
+        loader.begin_epoch(config)
 
         while True:
             batch, is_cont, step, total_steps = loader.get_micro_batch()

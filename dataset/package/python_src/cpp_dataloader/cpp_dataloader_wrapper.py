@@ -2,6 +2,19 @@ import ctypes
 import numpy as np
 import os
 import site
+from dataclasses import dataclass
+
+@dataclass
+class EpochConfig:
+    seed0: int = 0
+    seed1: int = 0
+    local_rank: int = 0
+    local_rank_count: int = 1
+    padding_token: int = -1
+    micro_batch_size: int = 4
+    context_size: int = 4096
+    min_data_length: int = 64
+    start_step: int = 0
 
 # Get the path to site-packages
 site_packages_paths = site.getsitepackages()
@@ -31,7 +44,7 @@ lib.data_loader_create.restype = ctypes.c_void_p
 lib.data_loader_destroy.argtypes = [ctypes.c_void_p]
 lib.data_loader_destroy.restype = None
 
-class EpochConfig(ctypes.Structure):
+class EpochConfigCpp(ctypes.Structure):
     _fields_ = [
         ("seed0", ctypes.c_uint64),
         ("seed1", ctypes.c_uint64),
@@ -44,7 +57,7 @@ class EpochConfig(ctypes.Structure):
         ("start_step", ctypes.c_uint32),
     ]
 
-lib.data_loader_begin_epoch.argtypes = [ctypes.c_void_p, ctypes.POINTER(EpochConfig)]
+lib.data_loader_begin_epoch.argtypes = [ctypes.c_void_p, ctypes.POINTER(EpochConfigCpp)]
 lib.data_loader_begin_epoch.restype = None
 
 lib.data_loader_get_micro_batch.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
@@ -81,7 +94,7 @@ class DataLoader:
     def begin_epoch(self, config):
         self.context_size = config.context_size
         self.microbatch_size = config.micro_batch_size
-        epoch_config = EpochConfig(
+        epoch_config = EpochConfigCpp(
             seed0=config.seed0,
             seed1=config.seed1,
             local_rank=config.local_rank,

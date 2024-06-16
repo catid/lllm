@@ -22,7 +22,7 @@ import torch.distributed as dist
 
 from torch.cuda.amp import GradScaler, autocast
 
-from cpp_dataloader import DataLoader, DataVerifier
+from cpp_dataloader import DataLoader, DataVerifier, EpochConfig
 from mora import replace_linear_with_mora
 
 import schedulefree
@@ -201,14 +201,26 @@ def main(args, shard_config):
         comm.barrier()
 
     # DataLoader
-    dataloader = DataLoader(args.dataset_dir, rank=rank, local_ranks=shard_config["rank_count"])
+    dataloader = DataLoader(args.dataset_dir)
     if not dataloader:
         raise RuntimeError("DataLoader failed to initialize")
 
     while True:
         # This seed is synchronized between ranks so they do not reuse the same data
         seed2 = epoch
-        dataloader.begin_epoch(seed, seed2, data_loader_batch_size, args.context)
+
+        config = EpochConfig()
+        config.seed0 = seed
+        config.seed1 = seed2
+        config.local_rank = rank
+        config.local_rank_count = shard_config["rank_count"]
+        config.padding_token = -1
+        config.micro_batch_size = data_loader_batch_size
+        config.context_size = args.context
+        config.min_data_length = 64
+        config.start_step = step
+
+        dataloader.begin_epoch(config)
 
         while True:
             start_time = time.time()
