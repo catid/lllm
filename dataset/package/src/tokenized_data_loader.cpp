@@ -43,15 +43,15 @@ void RowReadResults::Reset()
     RemainingCount = 0;
 }
 
-uint32_t RowReadResults::WriteOutput(
-    int32_t* output_row,
-    uint32_t context_size,
-    int32_t padding_token)
+uint32_t RowReadResults::WriteOutput(int32_t* output_row, const EpochConfig& config)
 {
     std::lock_guard<std::mutex> lock(Lock);
 
     uint32_t max_token_count = 0;
+
+    // By default we have no carry-over data
     NextResults.clear();
+    RemainingCount = 0;
 
     const uint32_t result_count = static_cast<uint32_t>( Results.size() );
     for (uint32_t i = 0; i < result_count; ++i) {
@@ -64,30 +64,33 @@ uint32_t RowReadResults::WriteOutput(
         const uint32_t write_end = dest.WriteOffset + dest.WriteCount;
         max_token_count = std::max(max_token_count, write_end);
 
-        if (write_end < context_size) {
-            output_row[write_end] = padding_token;
+        if (write_end < config.ContextSize) {
+            output_row[write_end] = config.PaddingToken;
         }
 
         // If there is more data left over:
         const uint32_t completed = dest.WriteCount + dest.ReadOffset;
         const uint32_t decompressed_tokens = static_cast<uint32_t>( result.Decomp->Result.size() );
-        if (completed < decompressed_tokens) {
+        const uint32_t remaining = decompressed_tokens - completed;
+
+        // If there is some data left over:
+        if (completed < decompressed_tokens && remaining >= config.MinDataLength) {
             // Prepare to read from it again on the next iteration
             ReadResult next;
             next.Decomp = result.Decomp;
             next.Dest.ReadOffset = completed;
             next.Dest.WriteOffset = 0;
-            next.Dest.WriteCount = std::min(context_size, decompressed_tokens - completed);
-            NextResults.push_back(next);
+            next.Dest.WriteCount = std::min(config.ContextSize, remaining);
 
-            RemainingCount = context_size - next.Dest.WriteCount;
+            NextResults.push_back(next);
+            RemainingCount = remaining; // Can be longer than ContextSize
         } else {
             Freed.push_back(result.Decomp);
         }
     }
 
-    for (uint32_t i = max_token_count; i < context_size; ++i) {
-        output_row[i] = padding_token;
+    for (uint32_t i = max_token_count; i < config.ContextSize; ++i) {
+        output_row[i] = config.PaddingToken;
     }
 
     if (NextResults.size() > 1) {
@@ -253,7 +256,7 @@ bool TokenizedDataLoader::Start(const std::string& data_folder_path)
 
     pool_.Start();
 
-    epoch_config_ = EpochConfig(); // Defaults
+    config_ = EpochConfig(); // Defaults
 
     ResetPrefill();
 
@@ -305,14 +308,14 @@ void TokenizedDataLoader::Stop()
 
 void TokenizedDataLoader::StartEpoch(const EpochConfig& config)
 {
-    epoch_config_ = config;
+    config_ = config;
 
-    if (epoch_config_.LocalRank >= epoch_config_.LocalRankCount) {
+    if (config_.LocalRank >= config_.LocalRankCount) {
         LOG_ERROR() << "Local rank " << config.LocalRank << " is out of range (local_ranks=" << config.LocalRankCount << ")";
         return;
     }
 
-    LOG_INFO() << "Epoch shuffling " << epoch_config_.MicroBatchSize << " microbatches of " << epoch_config_.ContextSize << " tokens each"; 
+    LOG_INFO() << "Epoch shuffling " << config_.MicroBatchSize << " microbatches of " << config_.ContextSize << " tokens each"; 
 
     if (!WaitUntilDataReady()) {
         return;
@@ -334,17 +337,17 @@ void TokenizedDataLoader::StartEpoch(const EpochConfig& config)
             }
         }
 
-        std::seed_seq seed{epoch_config_.Seed0, epoch_config_.Seed1};
+        std::seed_seq seed{config_.Seed0, config_.Seed1};
         std::mt19937 rng(seed);
         std::shuffle(shard_order_.begin(), shard_order_.end(), rng);
     });
 
-    uint64_t seed1 = epoch_config_.Seed1;
+    uint64_t seed1 = config_.Seed1;
 
     // Shuffle all the shard indices
     for (auto& shard : shards_) {
         pool_.QueueTask([this, shard, seed1](int /*worker_index*/) {
-            shard->ShuffleIndices(epoch_config_.Seed0, seed1, epoch_config_.LocalRank, epoch_config_.LocalRankCount);
+            shard->ShuffleIndices(config_.Seed0, seed1, config_.LocalRank, config_.LocalRankCount);
         });
         seed1++;
     }
@@ -355,14 +358,14 @@ void TokenizedDataLoader::StartEpoch(const EpochConfig& config)
     // Calculate the total number of steps in the dataset
     CalculateTotalSteps();
 
-    if (epoch_config_.StartStep > 0) {
-        LOG_INFO() << "Resuming training from step " << epoch_config_.StartStep;
+    if (config_.StartStep > 0) {
+        LOG_INFO() << "Resuming training from step " << config_.StartStep;
 
-        for (uint32_t i = 0; i < epoch_config_.StartStep; ++i) {
+        for (uint32_t i = 0; i < config_.StartStep; ++i) {
             GenerateMicrobatchRequests(true);
         }
 
-        current_step_ = epoch_config_.StartStep;
+        current_step_ = config_.StartStep;
     }
 
     Prefill();
@@ -377,8 +380,8 @@ void TokenizedDataLoader::ResetPrefill()
     current_step_ = 0;
 
     // Resize to the number of prefill tasks
-    row_read_results_.resize(epoch_config_.MicroBatchSize);
-    for (uint32_t batch_index = 0; batch_index < epoch_config_.MicroBatchSize; ++batch_index) {
+    row_read_results_.resize(config_.MicroBatchSize);
+    for (uint32_t batch_index = 0; batch_index < config_.MicroBatchSize; ++batch_index) {
         if (!row_read_results_[batch_index]) {
             row_read_results_[batch_index] = std::make_shared<RowReadResults>();
         }
@@ -503,17 +506,32 @@ int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
     // FIXME: We need to keep the previous request if we didn't actually make the request
     microbatch_requests_.clear();
 
-    for (uint32_t batch_index = 0; batch_index < epoch_config_.MicroBatchSize; ++batch_index)
+    for (uint32_t batch_index = 0; batch_index < config_.MicroBatchSize; ++batch_index)
     {
         auto& row = row_read_results_[batch_index];
 
-        uint32_t next_write_offset = row->RemainingCount + 1;
+        // If the data that is already waiting will fill the context:
+        if (row->RemainingCount >= config_.ContextSize) {
+            row->ExpectedNextRemainingCount = row->RemainingCount - config_.ContextSize;
+            if (row->ExpectedNextRemainingCount < config_.MinDataLength) {
+                row->ExpectedNextRemainingCount = 0;
+            }
+            continue;
+        }
+
+        row->ExpectedNextRemainingCount = 0; // Default is to have 0 remaining
+
+        uint32_t next_write_offset = row->RemainingCount;
+        if (next_write_offset > 0) {
+            next_write_offset++;
+        }
+        //LOG_INFO() << "FIXME: batch_index=" << batch_index << " next_write_offset=" << next_write_offset;
 
         // While there is space for data:
-        while (next_write_offset < epoch_config_.ContextSize)
+        while (next_write_offset < config_.ContextSize)
         {
-            const uint32_t remaining_space = epoch_config_.ContextSize - next_write_offset;
-            if (remaining_space < epoch_config_.MinDataLength) {
+            const uint32_t remaining_space = config_.ContextSize - next_write_offset;
+            if (remaining_space <=/*padding*/ config_.MinDataLength) {
                 break; // No more space for meaningful data
             }
 
@@ -540,16 +558,32 @@ int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
             }
 
             uint32_t write_end = request.dest.WriteOffset + original_tokens;
-            if (write_end > epoch_config_.ContextSize) {
-                request.dest.WriteCount = epoch_config_.ContextSize - request.dest.WriteOffset;
-                next_write_offset = epoch_config_.ContextSize; // Will break after this one
+            if (write_end >= config_.ContextSize) {
+                if (request.dest.WriteOffset >= config_.ContextSize) {
+                    LOG_ERROR() << "Internal error: Requested write offset " << request.dest.WriteOffset << " is greater than context size " << config_.ContextSize;
+                    return 0;
+                }
+                request.dest.WriteCount = config_.ContextSize - request.dest.WriteOffset;
+                next_write_offset = config_.ContextSize; // Will break after this one
 
-                // Store remaining count for this row for next step
-                row->RemainingCount = original_tokens - request.dest.WriteCount;
+                if (original_tokens < request.dest.WriteCount) {
+                    LOG_ERROR() << "Internal error: Requested write count " << request.dest.WriteCount << " is greater than original tokens " << original_tokens;
+                    return 0;
+                }
+
+                row->ExpectedNextRemainingCount = original_tokens - request.dest.WriteCount;
+                if (row->ExpectedNextRemainingCount < config_.MinDataLength) {
+                    row->ExpectedNextRemainingCount = 0;
+                }
             } else {
                 request.dest.WriteCount = original_tokens;
                 next_write_offset += write_end + 1;
             }
+#if 0
+            LOG_INFO() << "FIXME: request = batch_index=" << request.batch_index << " shard_index=" << request.shard_index
+                << " shard_span_index=" << request.shard_span_index << " dest.ReadOffset=" << request.dest.ReadOffset
+                << " dest.WriteOffset=" << request.dest.WriteOffset << " dest.WriteCount=" << request.dest.WriteCount;
+#endif
 
             if (!skipping) {
                 microbatch_requests_.push_back(request);
@@ -567,7 +601,15 @@ void TokenizedDataLoader::CalculateTotalSteps()
 
     for (;;) {
         int num_requests = GenerateMicrobatchRequests(true);
-        if (num_requests <= 0) {
+
+        uint32_t total_remaining = 0;
+        for (auto& row : row_read_results_) {
+            total_remaining += row->RemainingCount;
+
+            row->RemainingCount = row->ExpectedNextRemainingCount;
+        }
+
+        if (num_requests <= 0 && total_remaining == 0) {
             break;
         }
 
@@ -579,10 +621,16 @@ void TokenizedDataLoader::CalculateTotalSteps()
     for (const auto& shard : shards_) {
         shard->EpochNextSpan = 0;
     }
+    for (auto& row : row_read_results_) {
+        if (row->RemainingCount != 0) {
+            LOG_ERROR() << "Internal error: Row " << row->RemainingCount << " tokens remaining during step calculation";
+        }
+        row->RemainingCount = 0;
+    }
 }
 
 void TokenizedDataLoader::Prefill() {
-    LOG_DEBUG() << "Prefilling " << epoch_config_.MicroBatchSize << "...";
+    LOG_DEBUG() << "Prefilling " << config_.MicroBatchSize << "...";
 
     if (prefill_inflight_ > 0) {
         LOG_ERROR() << "Internal error: Prefill still inflight"; 
@@ -627,33 +675,34 @@ bool TokenizedDataLoader::GetTokenArray(
     uint32_t max_token_count = 0;
     uint32_t num_rows = 0;
 
-    for (uint32_t batch_index = 0; batch_index < epoch_config_.MicroBatchSize; ++batch_index)
+    for (uint32_t batch_index = 0; batch_index < config_.MicroBatchSize; ++batch_index)
     {
         int32_t* output_row = output_batch;
         auto& row = row_read_results_[batch_index];
 
         *is_continuation = row->RemainingCount > 0;
 
-        const uint32_t written = row->WriteOutput(
-            output_row,
-            epoch_config_.ContextSize,
-            epoch_config_.PaddingToken);
+        const uint32_t written = row->WriteOutput(output_row, config_);
         if (written == 0) {
             continue; // No data to write
         }
+        if (row->RemainingCount != row->ExpectedNextRemainingCount) {
+            LOG_ERROR() << "Internal error: Batch " << batch_index << " has " << row->RemainingCount
+                << " tokens remaining but expected " << row->ExpectedNextRemainingCount;
+        }
 
         max_token_count = std::max(max_token_count, written);
-        output_row += epoch_config_.ContextSize;
+        output_row += config_.ContextSize;
         ++num_rows;
         ++is_continuation;
-        output_batch += epoch_config_.ContextSize;
+        output_batch += config_.ContextSize;
     }
 
     // Pad the remaining unwritten rows with padding tokens
-    if (num_rows < epoch_config_.MicroBatchSize) {
-        const uint32_t pad_rows = epoch_config_.MicroBatchSize - num_rows;
-        for (uint32_t i = 0; i < epoch_config_.ContextSize; ++i) {
-            output_batch[i] = epoch_config_.PaddingToken;
+    if (num_rows < config_.MicroBatchSize) {
+        const uint32_t pad_rows = config_.MicroBatchSize - num_rows;
+        for (uint32_t i = 0; i < config_.ContextSize; ++i) {
+            output_batch[i] = config_.PaddingToken;
         }
         memset(is_continuation, 0, pad_rows);
     }

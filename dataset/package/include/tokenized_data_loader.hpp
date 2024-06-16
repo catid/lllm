@@ -17,6 +17,37 @@
 #include "yaml_parser.hpp"
 
 //------------------------------------------------------------------------------
+// EpochConfig
+
+struct EpochConfig {
+    // Random seed for shuffling (synchronzed between nodes)
+    uint64_t Seed0 = 0;
+    uint64_t Seed1 = 0;
+
+    // Local rank of the current process and the number of local ranks
+    uint32_t LocalRank = 0;
+    uint32_t LocalRankCount = 1;
+
+    // Padding token
+    int32_t PaddingToken = -1;
+
+    // Max size of a microbatch
+    uint32_t MicroBatchSize = 4;
+
+    // Max size of a context
+    uint32_t ContextSize = 4096;
+
+    // If data is shorter than this, we discard it.
+    // If data is longer than context then the remaining tokens may be discarded
+    // if they are under this limit.
+    uint32_t MinDataLength = 64;
+
+    // Start step for the epoch
+    uint32_t StartStep = 0;
+};
+
+
+//------------------------------------------------------------------------------
 // ReadRequest
 
 struct BufferTarget {
@@ -55,16 +86,20 @@ public:
     // Queued up set of decompressors for this batch row
     std::vector<ReadResult> Results;
 
+    // Number of tokens remaining for the first read result.
+    // This can be longer than the context size.
+    // This includes ready data, so it is updated on WriteOutput().
     uint32_t RemainingCount = 0;
+
+    // Written by GenerateMicrobatchRequests(), this is the number of tokens
+    // we expect to have left over after WriteOutput() is called.
+    uint32_t ExpectedNextRemainingCount = 0;
 
     std::shared_ptr<Decompressor> AddResult(const BufferTarget& dest);
     void Reset();
 
     // Writes to output and leaves behind any partial data
-    uint32_t WriteOutput(
-        int32_t* output_row,
-        uint32_t context_size,
-        int32_t padding_token);
+    uint32_t WriteOutput(int32_t* output_row, const EpochConfig& config);
 
 protected:
     std::mutex Lock;
@@ -129,33 +164,6 @@ private:
 //------------------------------------------------------------------------------
 // TokenizedDataLoader
 
-struct EpochConfig {
-    // Random seed for shuffling (synchronzed between nodes)
-    uint64_t Seed0 = 0;
-    uint64_t Seed1 = 0;
-
-    // Local rank of the current process and the number of local ranks
-    uint32_t LocalRank = 0;
-    uint32_t LocalRankCount = 1;
-
-    // Padding token
-    int32_t PaddingToken = -1;
-
-    // Max size of a microbatch
-    uint32_t MicroBatchSize = 4;
-
-    // Max size of a context
-    uint32_t ContextSize = 4096;
-
-    // If data is shorter than this, we discard it.
-    // If data is longer than context then the remaining tokens may be discarded
-    // if they are under this limit.
-    uint32_t MinDataLength = 32;
-
-    // Start step for the epoch
-    uint32_t StartStep = 0;
-};
-
 // This is not thread-safe so do not call methods from multiple threads.
 class TokenizedDataLoader {
 public:
@@ -206,7 +214,7 @@ public:
 private:
     uint32_t token_bytes_ = 0;
 
-    EpochConfig epoch_config_;
+    EpochConfig config_;
 
     // Is Stop() called?
     std::atomic<bool> Terminated = ATOMIC_VAR_INIT(false);
