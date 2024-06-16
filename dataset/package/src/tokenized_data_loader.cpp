@@ -321,8 +321,6 @@ void TokenizedDataLoader::BeginEpoch(const EpochConfig& config)
         return;
     }
 
-    LOG_INFO() << "Data ready"; 
-
     // Clear decompressor state etc
     ResetPrefill();
 
@@ -370,7 +368,7 @@ void TokenizedDataLoader::BeginEpoch(const EpochConfig& config)
         current_step_ = config_.StartStep;
     }
 
-    Prefill();
+    Prefill(true);
 }
 
 void TokenizedDataLoader::ResetPrefill()
@@ -501,7 +499,7 @@ bool TokenizedDataLoader::NextSpan(ReadRequest& request) {
     return false;
 }
 
-int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
+bool TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
 {
     int num_requests = 0;
 
@@ -517,6 +515,9 @@ int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
             if (row->ExpectedNextRemainingCount < config_.MinDataLength) {
                 row->ExpectedNextRemainingCount = 0;
             }
+            row->SkipRequest.dest.WriteOffset = 0;
+            row->SkipRequest.dest.ReadOffset += config_.ContextSize;
+            row->SkipRequest.dest.WriteCount = std::min(config_.ContextSize, row->ExpectedNextRemainingCount);
             continue;
         }
 
@@ -555,14 +556,14 @@ int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
             if (!r) {
                 LOG_ERROR() << "Failed to read span " << request.shard_span_index
                     << " from shard " << request.shard_index;
-                return 0;
+                return false;
             }
 
             uint32_t write_end = request.dest.WriteOffset + original_tokens;
             if (write_end >= config_.ContextSize) {
                 if (request.dest.WriteOffset >= config_.ContextSize) {
                     LOG_ERROR() << "Internal error: Requested write offset " << request.dest.WriteOffset << " is greater than context size " << config_.ContextSize;
-                    return 0;
+                    return false;
                 }
                 request.dest.WriteCount = config_.ContextSize - request.dest.WriteOffset;
                 next_write_offset = config_.ContextSize; // Will break after this one
@@ -576,6 +577,11 @@ int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
                 if (row->ExpectedNextRemainingCount < config_.MinDataLength) {
                     row->ExpectedNextRemainingCount = 0;
                 }
+
+                row->SkipRequest = request;
+                row->SkipRequest.dest.WriteOffset = 0; // Will be first write
+                row->SkipRequest.dest.ReadOffset = request.dest.WriteCount;
+                row->SkipRequest.dest.WriteCount = std::min(config_.ContextSize, row->ExpectedNextRemainingCount);
             } else {
                 request.dest.WriteCount = original_tokens;
                 next_write_offset += write_end + 1;
@@ -593,27 +599,25 @@ int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
         }
     }
 
-    return num_requests;
+    uint32_t total_remaining = 0;
+    for (auto& row : row_read_results_) {
+        total_remaining += row->RemainingCount;
+
+        // If skipping, simulate reading the skipped data
+        if (skipping) {
+            row->RemainingCount = row->ExpectedNextRemainingCount;
+        }
+    }
+
+    // Still data available if we are making requests or there is a buffer to read
+    return num_requests > 0 || total_remaining > 0;
 }
 
 void TokenizedDataLoader::CalculateTotalSteps()
 {
     total_steps_ = 0;
 
-    for (;;) {
-        int num_requests = GenerateMicrobatchRequests(true);
-
-        uint32_t total_remaining = 0;
-        for (auto& row : row_read_results_) {
-            total_remaining += row->RemainingCount;
-
-            row->RemainingCount = row->ExpectedNextRemainingCount;
-        }
-
-        if (num_requests <= 0 && total_remaining == 0) {
-            break;
-        }
-
+    while (GenerateMicrobatchRequests(true)) {
         ++total_steps_;
     }
 
@@ -630,7 +634,7 @@ void TokenizedDataLoader::CalculateTotalSteps()
     }
 }
 
-void TokenizedDataLoader::Prefill() {
+void TokenizedDataLoader::Prefill(bool include_skip_requests) {
     LOG_DEBUG() << "Prefilling " << config_.MicroBatchSize << "...";
 
     if (prefill_inflight_ > 0) {
@@ -639,6 +643,19 @@ void TokenizedDataLoader::Prefill() {
     }
 
     GenerateMicrobatchRequests(false);
+
+    // If we skipped over some data, we may need to go back and read
+    // from previous steps that spilled over into the current step.
+    if (include_skip_requests) {
+        for (auto& row : row_read_results_) {
+            // If there is data left over:
+            if (row->RemainingCount > 0) {
+                // Make the additional request prepared by GenerateMicrobatchRequests()
+                microbatch_requests_.push_back(row->SkipRequest);
+            }
+        }
+    }
+
     PostRequests();
 }
 
@@ -690,6 +707,7 @@ bool TokenizedDataLoader::GetTokenArray(
         if (row->RemainingCount != row->ExpectedNextRemainingCount) {
             LOG_ERROR() << "Internal error: Batch " << batch_index << " has " << row->RemainingCount
                 << " tokens remaining but expected " << row->ExpectedNextRemainingCount;
+            return false;
         }
 
         max_token_count = std::max(max_token_count, written);
@@ -724,6 +742,6 @@ bool TokenizedDataLoader::GetTokenArray(
         return false;
     }
 
-    Prefill();
+    Prefill(false);
     return true;
 }

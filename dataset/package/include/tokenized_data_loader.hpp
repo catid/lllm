@@ -95,6 +95,10 @@ public:
     // we expect to have left over after WriteOutput() is called.
     uint32_t ExpectedNextRemainingCount = 0;
 
+    // Next IO request that carries over from the previous step,
+    // used for skipping over data before the first output.
+    ReadRequest SkipRequest;
+
     std::shared_ptr<Decompressor> AddResult(const BufferTarget& dest);
     void Reset();
 
@@ -257,12 +261,11 @@ private:
     uint32_t total_steps_ = 0;
 
     void ResetPrefill();
-    void Prefill();
+    void Prefill(bool include_skip_requests);
 
     // Fill microbatch_requests_ with requests for the current microbatch.
-    // This is refactored out so that the logic is precisely the same for
-    // Prefill() and Skip().
-    int GenerateMicrobatchRequests(bool skipping);
+    // Returns true if data is available to read.
+    bool GenerateMicrobatchRequests(bool skipping);
 
     // Returns false if there is no more data to read.
     bool NextSpan(ReadRequest& request);
