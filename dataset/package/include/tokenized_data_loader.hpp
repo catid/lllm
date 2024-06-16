@@ -261,7 +261,7 @@ private:
     uint32_t total_steps_ = 0;
 
     void ResetPrefill();
-    void Prefill(bool include_skip_requests);
+    void Prefill();
 
     // Fill microbatch_requests_ with requests for the current microbatch.
     // Returns true if data is available to read.

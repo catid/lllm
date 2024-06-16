@@ -315,7 +315,7 @@ void TokenizedDataLoader::BeginEpoch(const EpochConfig& config)
         return;
     }
 
-    LOG_INFO() << "Epoch shuffling " << config_.MicroBatchSize << " microbatches of " << config_.ContextSize << " tokens each"; 
+    LOG_DEBUG() << "Epoch shuffling " << config_.MicroBatchSize << " microbatches of " << config_.ContextSize << " tokens each"; 
 
     if (!WaitUntilDataReady()) {
         return;
@@ -368,7 +368,7 @@ void TokenizedDataLoader::BeginEpoch(const EpochConfig& config)
         current_step_ = config_.StartStep;
     }
 
-    Prefill(true);
+    Prefill();
 }
 
 void TokenizedDataLoader::ResetPrefill()
@@ -509,15 +509,24 @@ bool TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
     {
         auto& row = row_read_results_[batch_index];
 
+        // If there is some data to back up and read from when we were skipping:
+        if (!skipping && row->SkipRequest.dest.WriteCount > 0) {
+            microbatch_requests_.push_back(row->SkipRequest);
+        }
+
+        // Reset skip request
+        row->SkipRequest.dest.WriteCount = 0;
+
         // If the data that is already waiting will fill the context:
         if (row->RemainingCount >= config_.ContextSize) {
             row->ExpectedNextRemainingCount = row->RemainingCount - config_.ContextSize;
             if (row->ExpectedNextRemainingCount < config_.MinDataLength) {
                 row->ExpectedNextRemainingCount = 0;
+            } else if (skipping) {
+                row->SkipRequest.dest.WriteOffset = 0;
+                row->SkipRequest.dest.ReadOffset += config_.ContextSize;
+                row->SkipRequest.dest.WriteCount = std::min(config_.ContextSize, row->ExpectedNextRemainingCount);
             }
-            row->SkipRequest.dest.WriteOffset = 0;
-            row->SkipRequest.dest.ReadOffset += config_.ContextSize;
-            row->SkipRequest.dest.WriteCount = std::min(config_.ContextSize, row->ExpectedNextRemainingCount);
             continue;
         }
 
@@ -578,10 +587,12 @@ bool TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
                     row->ExpectedNextRemainingCount = 0;
                 }
 
-                row->SkipRequest = request;
-                row->SkipRequest.dest.WriteOffset = 0; // Will be first write
-                row->SkipRequest.dest.ReadOffset = request.dest.WriteCount;
-                row->SkipRequest.dest.WriteCount = std::min(config_.ContextSize, row->ExpectedNextRemainingCount);
+                if (skipping) {
+                    row->SkipRequest = request;
+                    row->SkipRequest.dest.WriteOffset = 0; // Will be first write
+                    row->SkipRequest.dest.ReadOffset = request.dest.WriteCount;
+                    row->SkipRequest.dest.WriteCount = std::min(config_.ContextSize, row->ExpectedNextRemainingCount);
+                }
             } else {
                 request.dest.WriteCount = original_tokens;
                 next_write_offset += write_end + 1;
@@ -634,7 +645,7 @@ void TokenizedDataLoader::CalculateTotalSteps()
     }
 }
 
-void TokenizedDataLoader::Prefill(bool include_skip_requests) {
+void TokenizedDataLoader::Prefill() {
     LOG_DEBUG() << "Prefilling " << config_.MicroBatchSize << "...";
 
     if (prefill_inflight_ > 0) {
@@ -643,19 +654,6 @@ void TokenizedDataLoader::Prefill(bool include_skip_requests) {
     }
 
     GenerateMicrobatchRequests(false);
-
-    // If we skipped over some data, we may need to go back and read
-    // from previous steps that spilled over into the current step.
-    if (include_skip_requests) {
-        for (auto& row : row_read_results_) {
-            // If there is data left over:
-            if (row->RemainingCount > 0) {
-                // Make the additional request prepared by GenerateMicrobatchRequests()
-                microbatch_requests_.push_back(row->SkipRequest);
-            }
-        }
-    }
-
     PostRequests();
 }
 
@@ -742,6 +740,6 @@ bool TokenizedDataLoader::GetTokenArray(
         return false;
     }
 
-    Prefill(false);
+    Prefill();
     return true;
 }

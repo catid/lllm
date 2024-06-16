@@ -97,11 +97,7 @@ bool test_k_start_step(int skip_steps) {
     config.MicroBatchSize = k_micro_batch_size;
     config.ContextSize = k_context_size;
 
-    LOG_INFO() << "test_k_start_step: BEGIN EPOCH";
-
     loader1.BeginEpoch(config);
-
-    LOG_INFO() << "test_k_start_step: BEGUN EPOCH";
 
     // Loader1: Advance N steps
     for (int i = 0; i < skip_steps; ++i) {
@@ -116,7 +112,7 @@ bool test_k_start_step(int skip_steps) {
             return false;
         }
 
-        LOG_INFO() << "Loader1 step " << i+1 << ": " << output_batch[0] << " - " << (int)is_continuation[0];
+        //LOG_INFO() << "Loader1 step " << i+1 << ": " << output_batch[0] << " - " << (int)is_continuation[0];
     }
 
     // Save the output of the final call
@@ -130,7 +126,7 @@ bool test_k_start_step(int skip_steps) {
         return false;
     }
 
-    LOG_INFO() << "Loader1 step next: " << output_batch1[0] << " - " << (int)is_continuation1[0];
+    //LOG_INFO() << "Loader1 step next: " << output_batch1[0] << " - " << (int)is_continuation1[0];
 
     loader1.Stop();
 
@@ -138,11 +134,7 @@ bool test_k_start_step(int skip_steps) {
     config.ContextSize = k_context_size;
     config.StartStep = skip_steps;
 
-    LOG_INFO() << "test_k_start_step: BEGIN EPOCH";
-
     loader2.BeginEpoch(config);
-
-    LOG_INFO() << "test_k_start_step: BEGUN EPOCH";
 
     uint32_t micro_batch_size2;
     uint32_t num_tokens2;
