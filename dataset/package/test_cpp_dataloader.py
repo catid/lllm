@@ -53,7 +53,7 @@ if __name__ == "__main__":
         start_time = time.time()
 
         loader = DataLoader(data_path, rank=0, local_ranks=2)
-        loader.start_epoch(0, 0, 128, 8192)
+        loader.begin_epoch(0, 0, 128, 8192)
 
         while True:
             batch, is_cont, step, total_steps = loader.get_micro_batch()

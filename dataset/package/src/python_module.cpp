@@ -28,7 +28,7 @@ void data_loader_destroy(void* data_loader) {
     delete loader;
 }
 
-void data_loader_start_epoch(
+void data_loader_begin_epoch(
     void* data_loader,
     const EpochConfig* config)
 {
@@ -37,7 +37,7 @@ void data_loader_start_epoch(
     }
 
     TokenizedDataLoader* loader = static_cast<TokenizedDataLoader*>(data_loader);
-    loader->StartEpoch(*config);
+    loader->BeginEpoch(*config);
 }
 
 bool data_loader_get_micro_batch(

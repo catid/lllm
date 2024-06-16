@@ -27,7 +27,7 @@ def main(args, shard_config):
     if not dataloader:
         raise RuntimeError("DataLoader failed to initialize")
 
-    dataloader.start_epoch(args.seed0, args.seed1, args.batch, args.context)
+    dataloader.begin_epoch(args.seed0, args.seed1, args.batch, args.context)
 
     total_microbatches = 0
 

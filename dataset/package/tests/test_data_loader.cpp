@@ -33,7 +33,7 @@ bool test_data_loader() {
     config.ContextSize = k_context_size;
     config.StartStep = k_start_step;
 
-    loader.StartEpoch(config);
+    loader.BeginEpoch(config);
 
     uint64_t total_spans = 0;
     uint32_t step = 0, total_steps = 0, actual_steps = 0;
@@ -97,7 +97,7 @@ bool test_k_start_step(int steps) {
     config.MicroBatchSize = k_micro_batch_size;
     config.ContextSize = k_context_size;
 
-    loader1.StartEpoch(config);
+    loader1.BeginEpoch(config);
 
     // Loader1: Advance 10 steps
     for (int i = 0; i < steps; ++i) {
@@ -134,7 +134,7 @@ bool test_k_start_step(int steps) {
     config.ContextSize = k_context_size;
     config.StartStep = steps;
 
-    loader1.StartEpoch(config);
+    loader1.BeginEpoch(config);
 
     uint32_t micro_batch_size2;
     uint32_t num_tokens2;

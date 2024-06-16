@@ -195,7 +195,7 @@ public:
         This allows us to process more tokens per batch.
         More info here: https://github.com/Dao-AILab/flash-attention/issues/432
     */
-    void StartEpoch(const EpochConfig& config);
+    void BeginEpoch(const EpochConfig& config);
 
     // Pause until all data from the current microbatch is ready.
     bool WaitUntilDataReady();

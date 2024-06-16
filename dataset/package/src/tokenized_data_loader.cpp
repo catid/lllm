@@ -306,7 +306,7 @@ void TokenizedDataLoader::Stop()
     global_index_yaml_ = nullptr;
 }
 
-void TokenizedDataLoader::StartEpoch(const EpochConfig& config)
+void TokenizedDataLoader::BeginEpoch(const EpochConfig& config)
 {
     config_ = config;
 
@@ -503,7 +503,6 @@ int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
 {
     int num_requests = 0;
 
-    // FIXME: We need to keep the previous request if we didn't actually make the request
     microbatch_requests_.clear();
 
     for (uint32_t batch_index = 0; batch_index < config_.MicroBatchSize; ++batch_index)

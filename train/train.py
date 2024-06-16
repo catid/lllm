@@ -208,7 +208,7 @@ def main(args, shard_config):
     while True:
         # This seed is synchronized between ranks so they do not reuse the same data
         seed2 = epoch
-        dataloader.start_epoch(seed, seed2, data_loader_batch_size, args.context)
+        dataloader.begin_epoch(seed, seed2, data_loader_batch_size, args.context)
 
         while True:
             start_time = time.time()
