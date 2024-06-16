@@ -25,13 +25,16 @@ bool test_data_loader() {
         return false;
     }
 
-    uint64_t seed0 = 0;
-    uint64_t seed1 = 0;
     uint32_t k_micro_batch_size = 64;
     uint32_t k_context_size = 8192;
     uint32_t k_start_step = 0;
 
-    loader.StartEpoch(seed0, seed1, k_micro_batch_size, k_context_size, k_start_step);
+    EpochConfig config;
+    config.MicroBatchSize = k_micro_batch_size;
+    config.ContextSize = k_context_size;
+    config.StartStep = k_start_step;
+
+    loader.StartEpoch(config);
 
     uint64_t total_spans = 0;
     uint32_t step = 0, total_steps = 0, actual_steps = 0;
@@ -89,13 +92,16 @@ bool test_k_start_step(int steps) {
         return false;
     }
 
-    uint64_t seed0 = 0;
-    uint64_t seed1 = 0;
     uint32_t k_micro_batch_size = 8;
     uint32_t k_context_size = 8192;
 
+    EpochConfig config;
+    config.MicroBatchSize = k_micro_batch_size;
+    config.ContextSize = k_context_size;
+
+    loader1.StartEpoch(config);
+
     // Loader1: Advance 10 steps
-    loader1.StartEpoch(seed0, seed1, k_micro_batch_size, k_context_size, 0);
     for (int i = 0; i < steps; ++i) {
         uint32_t micro_batch_size;
         uint32_t num_tokens;
@@ -126,9 +132,11 @@ bool test_k_start_step(int steps) {
 
     loader1.Stop();
 
-    // Loader2: Start with k_start_step = 10
-    uint32_t k_start_step = steps;
-    loader2.StartEpoch(seed0, seed1, k_micro_batch_size, k_context_size, k_start_step);
+    config.MicroBatchSize = k_micro_batch_size;
+    config.ContextSize = k_context_size;
+    config.StartStep = steps;
+
+    loader1.StartEpoch(config);
 
     uint32_t micro_batch_size2;
     uint32_t num_tokens2;

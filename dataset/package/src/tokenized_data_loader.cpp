@@ -9,6 +9,101 @@
 
 #include "tools.hpp"
 
+//------------------------------------------------------------------------------
+// RowReadResults
+
+std::shared_ptr<Decompressor> RowReadResults::AddResult(
+    uint32_t read_offset,
+    uint32_t write_offset,
+    uint32_t write_count)
+{
+    std::lock_guard<std::mutex> lock(Lock);
+
+    std::shared_ptr<Decompressor> decompressor;
+
+    if (Freed.empty()) {
+        decompressor = std::make_shared<Decompressor>();
+    } else {
+        decompressor = Freed.back();
+        Freed.pop_back();
+        decompressor->Result.clear();
+    }
+
+    Results.push_back({decompressor, read_offset, write_offset, write_count});
+
+    return decompressor;
+}
+
+void RowReadResults::Reset()
+{
+    std::lock_guard<std::mutex> lock(Lock);
+
+    // Reuse all decompressor objects
+    for (auto& result : Results) {
+        Freed.push_back(result.Decompressor);
+    }
+    Results.clear();
+    NextWriteOffset = 0;
+}
+
+uint32_t RowReadResults::WriteOutput(
+    int32_t* output_row,
+    uint32_t context_size,
+    int32_t padding_token)
+{
+    std::lock_guard<std::mutex> lock(Lock);
+
+    uint32_t max_token_count = 0;
+    NextResults.clear();
+
+    const uint32_t result_count = static_cast<uint32_t>( Results.size() );
+    for (uint32_t i = 0; i < result_count; ++i) {
+        const auto& result = Results[i];
+        const auto& dest = result.Dest;
+        const int32_t* decompressed_ptr = result.Decompressor->Result.data();
+
+        memcpy(output_row + dest.WriteOffset, decompressed_ptr + dest.ReadOffset, dest.WriteCount * sizeof(int32_t));
+
+        const uint32_t write_end = dest.WriteOffset + dest.WriteCount;
+        max_token_count = std::max(max_token_count, write_end);
+
+        if (write_end < context_size) {
+            output_row[write_end] = padding_token;
+        }
+
+        // If there is more data left over:
+        const uint32_t completed = dest.WriteCount + dest.ReadOffset;
+        const uint32_t decompressed_tokens = static_cast<uint32_t>( result.Decompressor->Result.size() );
+        if (completed < decompressed_tokens) {
+            // FIXME: REVISIT THIS
+            // Prepare to read from it again on the next iteration
+            ReadResult next;
+            next.Decompressor = result.Decompressor;
+            next.Dest.ReadOffset = completed;
+            next.Dest.WriteOffset = 0;
+            next.Dest.WriteCount = std::min(context_size, decompressed_tokens - completed);
+            NextResults.push_back(next);
+
+            NextWriteOffset += next.Dest.WriteCount + 1;
+        } else {
+            Freed.push_back(result.Decompressor);
+        }
+    }
+
+    for (uint32_t i = max_token_count; i < context_size; ++i) {
+        output_row[i] = padding_token;
+    }
+
+    if (NextResults.size() > 1) {
+        LOG_ERROR() << "Internal error: More than one ReadResult continuation!  This should never happen.";
+    }
+
+    // Results = NextResults
+    std::swap(Results, NextResults);
+
+    return max_token_count;
+}
+
 
 //------------------------------------------------------------------------------
 // DataShardContext
@@ -143,23 +238,8 @@ bool DataShardContext::GetSpan(
 //------------------------------------------------------------------------------
 // TokenizedDataLoader
 
-bool TokenizedDataLoader::Start(
-    const std::string& data_folder_path,
-    uint32_t rank,
-    uint32_t local_ranks)
+bool TokenizedDataLoader::Start(const std::string& data_folder_path)
 {
-    rank_ = rank;
-    local_ranks_ = local_ranks;
-
-    if (rank_ >= local_ranks_) {
-        LOG_ERROR() << "Rank " << rank_ << " is out of range (local_ranks=" << local_ranks_ << ")";
-        return false;
-    }
-    if (local_ranks <= 0) {
-        LOG_ERROR() << "Local ranks must be greater than 0";
-        return false;
-    }
-
     Stop();
 
     global_index_yaml_ = std::make_shared<GlobalIndexYaml>();
@@ -177,9 +257,7 @@ bool TokenizedDataLoader::Start(
 
     pool_.Start();
 
-    // These are set during StartEpoch()
-    context_size_ = 0;
-    micro_batch_size_ = 0;
+    epoch_config_ = EpochConfig(); // Defaults
 
     ResetPrefill();
 
@@ -225,80 +303,30 @@ void TokenizedDataLoader::Stop()
     // This kills the trailing read requests
     shards_.clear();
 
-    decompressors_.clear();
-    output_used_.clear();
+    row_read_results_.clear();
     global_index_yaml_ = nullptr;
 }
 
-void TokenizedDataLoader::CalculateTotalSteps()
+void TokenizedDataLoader::StartEpoch(const EpochConfig& config)
 {
-    total_steps_ = 0;
+    epoch_config_ = config;
 
-    std::vector<int> remaining(micro_batch_size_);
-
-    ReadRequest request;
-    for (;;) {
-        bool all_spans_exhausted = true;
-        for (uint32_t i = 0; i < micro_batch_size_; ++i) {
-            if (remaining[i] <= 0) {
-                if (NextSpan(request)) {
-                    uint64_t offset = 0;
-                    uint32_t cbytes = 0;
-                    uint32_t original_tokens = 0;
-                    bool span_okay = shards_[request.shard_index]->GetSpan(
-                        request.shard_span_index,
-                        offset,
-                        cbytes,
-                        original_tokens);
-                    if (span_okay) {
-                        remaining[i] = original_tokens;
-                    }
-                }
-            }
-            if (remaining[i] > 0) {
-                all_spans_exhausted = false;
-            }
-            remaining[i] -= context_size_;
-        }
-
-        if (!all_spans_exhausted) {
-            total_steps_++;
-        } else {
-            break;
-        }
+    if (epoch_config_.LocalRank >= epoch_config_.LocalRankCount) {
+        LOG_ERROR() << "Local rank " << config.LocalRank << " is out of range (local_ranks=" << config.LocalRankCount << ")";
+        return;
     }
 
-    // Reset state
-    next_shard_index_ = 0;
-    for (const auto& shard : shards_) {
-        shard->EpochNextSpan = 0;
-    }
-}
-
-void TokenizedDataLoader::StartEpoch(
-    uint64_t seed0, uint64_t seed1,
-    uint32_t micro_batch_size,
-    uint32_t context_size,
-    uint32_t max_end_padding,
-    uint32_t min_string_length,
-    uint32_t start_step)
-{
-    LOG_INFO() << "Epoch shuffling " << micro_batch_size << " microbatches of " << context_size << " tokens each";
+    LOG_INFO() << "Epoch shuffling " << epoch_config_.MicroBatchSize << " microbatches of " << epoch_config_.ContextSize << " tokens each"; 
 
     if (!WaitUntilDataReady()) {
         return;
     }
 
-    micro_batch_size_ = micro_batch_size;
-    context_size_ = context_size;
-    max_end_padding_ = max_end_padding;
-    min_string_length_ = min_string_length;
-
     // Clear decompressor state etc
     ResetPrefill();
 
     // Shuffle the order in which we step through the shards
-    pool_.QueueTask([this, seed0, seed1](int /*worker_index*/) {
+    pool_.QueueTask([this](int /*worker_index*/) {
         shard_order_.resize(shards_.size() * kShardOrderMult);
         uint32_t* shard_ptr = shard_order_.data();
 
@@ -310,16 +338,17 @@ void TokenizedDataLoader::StartEpoch(
             }
         }
 
-        std::seed_seq seed{seed0, seed1};
+        std::seed_seq seed{epoch_config_.Seed0, epoch_config_.Seed1};
         std::mt19937 rng(seed);
         std::shuffle(shard_order_.begin(), shard_order_.end(), rng);
     });
-    seed1++;
+
+    uint64_t seed1 = epoch_config_.Seed1;
 
     // Shuffle all the shard indices
     for (auto& shard : shards_) {
-        pool_.QueueTask([this, shard, seed0, seed1](int /*worker_index*/) {
-            shard->ShuffleIndices(seed0, seed1, rank_, local_ranks_);
+        pool_.QueueTask([this, shard, seed1](int /*worker_index*/) {
+            shard->ShuffleIndices(epoch_config_.Seed0, seed1, epoch_config_.LocalRank, epoch_config_.LocalRankCount);
         });
         seed1++;
     }
@@ -330,12 +359,17 @@ void TokenizedDataLoader::StartEpoch(
     // Calculate the total number of steps in the dataset
     CalculateTotalSteps();
 
-    if (start_step > 0) {
-        LOG_INFO() << "Resuming training from step " << start_step;
-        Skip(start_step);
-    } else {
-        Prefill();
+    if (epoch_config_.StartStep > 0) {
+        LOG_INFO() << "Resuming training from step " << epoch_config_.StartStep;
+
+        for (int i = 0; i < epoch_config_.StartStep; ++i) {
+            GenerateMicrobatchRequests(true);
+        }
+
+        current_step_ = epoch_config_.StartStep;
     }
+
+    Prefill();
 }
 
 void TokenizedDataLoader::ResetPrefill()
@@ -347,80 +381,31 @@ void TokenizedDataLoader::ResetPrefill()
     current_step_ = 0;
 
     // Resize to the number of prefill tasks
-    decompressors_.resize(micro_batch_size_);
-    output_used_.resize(micro_batch_size_);
-    for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index) {
-        if (!decompressors_[batch_index]) {
-            decompressors_[batch_index] = std::make_shared<Decompressor>();
-        }
-        output_used_[batch_index] = 0;
-        decompressors_[batch_index]->Result.clear();
+    row_read_results_.resize(epoch_config_.MicroBatchSize);
+    for (uint32_t batch_index = 0; batch_index < epoch_config_.MicroBatchSize; ++batch_index) {
+        row_read_results_[batch_index].Reset();
     }
 }
 
-void TokenizedDataLoader::Prefill() {
-    LOG_DEBUG() << "Prefilling " << micro_batch_size_ << "...";
-
-    if (prefill_inflight_ > 0) {
-        LOG_ERROR() << "Internal error: Prefill still inflight"; 
-        return;
-    }
-
-    std::vector<ReadRequest> requests;
-
-    int continuations = 0;
-
-    for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index)
-    {
-        auto& decompressor = decompressors_[batch_index];
-        const uint32_t decompressed_words = decompressor->Result.size();
-        const uint32_t used = output_used_[batch_index];
-
-        //LOG_INFO() << "Prefill: batch_index=" << batch_index << ", used=" << used << ", decompressed_words=" << decompressed_words;
-
-        // If there is still data to read, do not prefill this row
-        if (used > 0 && used < decompressed_words) {
-            ++continuations;
-            continue;
-        }
-
-        ReadRequest request;
-        request.batch_index = batch_index;
-        if (!NextSpan(request)) {
-            break; // No more data to read
-        }
-
-        requests.push_back(request);
-
-        // Reset the used count for this row
-        output_used_[batch_index] = 0;
-    }
-
-    PostRequests(continuations, requests);
-}
-
-void TokenizedDataLoader::PostRequests(int continuations, const std::vector<ReadRequest>& requests)
+void TokenizedDataLoader::PostRequests()
 {
-    if (requests.empty()) {
-        if (continuations == 0) {
-            LOG_INFO() << "Prepared dataset files contain no more data";
-        }
+    if (microbatch_requests_.empty()) {
         prefill_complete_ = true;
         return;
     }
 
     prefill_complete_ = false;
     prefill_started_ = true;
-    prefill_inflight_ += (uint32_t)requests.size();
+    prefill_inflight_ += (uint32_t)microbatch_requests_.size();
 
-    for (auto request : requests) {
+    for (auto request : microbatch_requests_) {
         pool_.QueueTask([this, request](int /*worker_index*/) {
             if (request.shard_index >= shards_.size()) {
                 LOG_ERROR() << "Internal error: Requested shard index " << request.shard_index << " is out of range";
                 worker_error_ = true;
                 return;
             }
-            if (request.batch_index >= decompressors_.size()) {
+            if (request.batch_index >= row_read_results_.size()) {
                 LOG_ERROR() << "Internal error: Requested batch index " << request.batch_index << " is out of range";
                 worker_error_ = true;
                 return;
@@ -447,7 +432,7 @@ void TokenizedDataLoader::PostRequests(int continuations, const std::vector<Read
                     uint8_t* compressed_data,
                     uint32_t compressed_bytes)
             {
-                if (request.batch_index >= decompressors_.size()) {
+                if (request.batch_index >= row_read_results_.size()) {
                     LOG_ERROR() << "Internal error: Requested batch index " << request.batch_index << " is out of range";
                     worker_error_ = true;
                     return;
@@ -515,38 +500,36 @@ bool TokenizedDataLoader::NextSpan(ReadRequest& request) {
     return false;
 }
 
-bool TokenizedDataLoader::Skip(int steps)
+int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
 {
-    // FIXME: This needs to be updated
+    int num_requests = 0;
 
-    current_step_ = static_cast<uint32_t>(steps);
+    // FIXME: We need to keep the previous request if we didn't actually make the request
+    microbatch_requests_.clear();
 
-    std::vector<int> available(micro_batch_size_);
-    std::vector<ReadRequest> requests(micro_batch_size_);
-
-    for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index) {
-        output_used_[batch_index] = 0;
-    }
-
-    for (int i = 0; i <= steps; ++i)
+    for (uint32_t batch_index = 0; batch_index < epoch_config_.MicroBatchSize; ++batch_index)
     {
-        for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index)
+        auto& row = row_read_results_[batch_index];
+
+        uint32_t next_write_offset = row.RemainingCount + 1;
+
+        // While there is space for data:
+        while (next_write_offset < epoch_config_.ContextSize)
         {
-            ReadRequest& request = requests[batch_index];
-            request.batch_index = batch_index;
-
-            request.skip += context_size_;
-
-            const int remaining = available[batch_index] - request.skip;
-            if (remaining > 0) {
-                continue;
+            const uint32_t remaining_space = epoch_config_.ContextSize - next_write_offset;
+            if (remaining_space < epoch_config_.MinDataLength) {
+                break; // No more space for meaningful data
             }
 
+            ReadRequest request;
+            request.batch_index = batch_index;
             if (!NextSpan(request)) {
-                available[batch_index] = 0;
                 break; // No more data to read
             }
+            request.dest.ReadOffset = 0;
+            request.dest.WriteOffset = next_write_offset;
 
+            // Get original token count
             uint64_t offset = 0;
             uint32_t cbytes = 0, original_tokens = 0;
             bool r = shards_[request.shard_index]->GetSpan(
@@ -557,17 +540,61 @@ bool TokenizedDataLoader::Skip(int steps)
             if (!r) {
                 LOG_ERROR() << "Failed to read span " << request.shard_span_index
                     << " from shard " << request.shard_index;
-                return false;
+                return;
             }
 
-            available[batch_index] = original_tokens;
-            request.skip = 0;
+            uint32_t write_end = request.dest.WriteOffset + original_tokens;
+            if (write_end > epoch_config_.ContextSize) {
+                request.dest.WriteCount = epoch_config_.ContextSize - request.dest.WriteOffset;
+                next_write_offset = epoch_config_.ContextSize; // Will break after this one
+
+                // Store remaining count for this row for next step
+                row.RemainingCount = original_tokens - request.dest.WriteCount;
+            } else {
+                request.dest.WriteCount = original_tokens;
+                next_write_offset += write_end + 1;
+            }
+
+            if (!skipping) {
+                microbatch_requests_.push_back(request);
+            }
+            ++num_requests;
         }
     }
 
-    PostRequests(0, requests);
+    return num_requests;
+}
 
-    return true;
+void TokenizedDataLoader::CalculateTotalSteps()
+{
+    total_steps_ = 0;
+
+    for (;;) {
+        int num_requests = GenerateMicrobatchRequests(true);
+        if (num_requests <= 0) {
+            break;
+        }
+
+        ++total_steps_;
+    }
+
+    // Reset state messed with by NextSpan()
+    next_shard_index_ = 0;
+    for (const auto& shard : shards_) {
+        shard->EpochNextSpan = 0;
+    }
+}
+
+void TokenizedDataLoader::Prefill() {
+    LOG_DEBUG() << "Prefilling " << epoch_config_.MicroBatchSize << "...";
+
+    if (prefill_inflight_ > 0) {
+        LOG_ERROR() << "Internal error: Prefill still inflight"; 
+        return;
+    }
+
+    GenerateMicrobatchRequests(false);
+    PostRequests();
 }
 
 bool TokenizedDataLoader::WaitUntilDataReady() {
@@ -604,48 +631,32 @@ bool TokenizedDataLoader::GetTokenArray(
     uint32_t max_token_count = 0;
     uint32_t num_rows = 0;
 
-    for (uint32_t batch_index = 0; batch_index < micro_batch_size_; ++batch_index) {
-        auto& decompressor = decompressors_[batch_index];
-        if (!decompressor) {
-            continue;
-        }
-        const int32_t* decompressed_ptr = decompressor->Result.data();
-        const uint32_t decompressed_words = decompressor->Result.size();
+    for (uint32_t batch_index = 0; batch_index < epoch_config_.MicroBatchSize; ++batch_index, output_batch += epoch_config_.ContextSize)
+    {
+        int32_t* output_row = output_batch;
+        auto& row = row_read_results_[batch_index];
 
-        const uint32_t used = output_used_[batch_index];
-        const uint32_t available = decompressed_words - used;
-        if (available <= 0) {
-            continue;
-        }
-        uint32_t copy_words = std::min(available, context_size_);
+        *is_continuation = row.IsContinuation();
 
-        //LOG_INFO() << "GetTokenArray: batch_index=" << batch_index << ", copy_words=" << copy_words << ", used=" << used << ", available=" << available << ", decompressed_words=" << decompressed_words;
-
-        memcpy(output_batch, decompressed_ptr + used, copy_words * sizeof(uint32_t));
-        output_batch += copy_words;
-        max_token_count = std::max(max_token_count, copy_words);
-
-        const uint32_t pad_words = context_size_ - copy_words;
-        if (pad_words > 0) {
-            for (uint32_t i = 0; i < pad_words; ++i) {
-                output_batch[i] = kPaddingToken;
-            }
-            output_batch += pad_words;
+        const uint32_t written = row.WriteOutput(
+            output_row,
+            epoch_config_.ContextSize,
+            epoch_config_.PaddingToken);
+        if (written == 0) {
+            continue; // No data to write
         }
 
-        // Signal continuation for this row
-        *is_continuation++ = (used != 0);
-
-        output_used_[batch_index] = used + copy_words;
-
+        max_token_count = std::max(max_token_count, written);
+        output_row += epoch_config_.ContextSize;
         ++num_rows;
+        ++is_continuation;
     }
 
     // Pad the remaining unwritten rows with padding tokens
-    if (num_rows < micro_batch_size_) {
-        const uint32_t pad_rows = micro_batch_size_ - num_rows;
-        for (uint32_t i = 0; i < context_size_; ++i) {
-            output_batch[i] = kPaddingToken;
+    if (num_rows < epoch_config_.MicroBatchSize) {
+        const uint32_t pad_rows = epoch_config_.MicroBatchSize - num_rows;
+        for (uint32_t i = 0; i < epoch_config_.ContextSize; ++i) {
+            output_batch[i] = epoch_config_.PaddingToken;
         }
         memset(is_continuation, 0, pad_rows);
     }

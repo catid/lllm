@@ -19,15 +19,16 @@
 //------------------------------------------------------------------------------
 // ReadRequest
 
+struct BufferTarget {
+    // How the data should be written to the output buffer by WriteOutput()
+    uint32_t ReadOffset = 0;
+    uint32_t WriteOffset = 0;
+    uint32_t WriteCount = 0;
+};
+
 struct ReadRequest {
     // Which batch row this will go into
     uint32_t batch_index = 0;
-
-    // Offset where this data will be written in the batch row
-    uint32_t write_offset = 0;
-
-    // Number of tokens to write
-    uint32_t write_count = 0;
 
     // Which shard (data file) to read from
     uint32_t shard_index = 0;
@@ -35,8 +36,47 @@ struct ReadRequest {
     // Index of the span of compressed data to read
     uint32_t shard_span_index = 0;
 
-    // Number of tokens to skip in this read request
-    uint32_t skip = 0;
+    // Output buffer operation
+    BufferTarget dest;
+};
+
+
+//------------------------------------------------------------------------------
+// RowReadResults
+
+struct ReadResult {
+    std::shared_ptr<Decompressor> Decompressor;
+
+    BufferTarget Dest;
+};
+
+class RowReadResults {
+public:
+    // Queued up set of decompressors for this batch row
+    std::vector<ReadResult> Results;
+
+    uint32_t RemainingCount = 0;
+
+    std::shared_ptr<Decompressor> AddResult(
+        uint32_t read_offset,
+        uint32_t write_offset,
+        uint32_t write_count);
+    void Reset();
+
+    // Call this before WriteOutput to check if some of the data is continued
+    // from the previous microbatch.
+    bool IsContinuation() const;
+
+    // Writes to output and leaves behind any partial data
+    uint32_t WriteOutput(
+        int32_t* output_row,
+        uint32_t context_size,
+        int32_t padding_token);
+
+protected:
+    std::mutex Lock;
+    std::vector<std::shared_ptr<Decompressor>> Freed;
+    std::vector<ReadResult> NextResults;
 };
 
 
@@ -96,6 +136,33 @@ private:
 //------------------------------------------------------------------------------
 // TokenizedDataLoader
 
+struct EpochConfig {
+    // Random seed for shuffling (synchronzed between nodes)
+    uint64_t Seed0 = 0;
+    uint64_t Seed1 = 0;
+
+    // Local rank of the current process and the number of local ranks
+    uint32_t LocalRank = 0;
+    uint32_t LocalRankCount = 1;
+
+    // Padding token
+    int32_t PaddingToken = -1;
+
+    // Max size of a microbatch
+    uint32_t MicroBatchSize = 4;
+
+    // Max size of a context
+    uint32_t ContextSize = 4096;
+
+    // If data is shorter than this, we discard it.
+    // If data is longer than context then the remaining tokens may be discarded
+    // if they are under this limit.
+    uint32_t MinDataLength = 32;
+
+    // Start step for the epoch
+    uint32_t StartStep = 0;
+};
+
 // This is not thread-safe so do not call methods from multiple threads.
 class TokenizedDataLoader {
 public:
@@ -106,10 +173,7 @@ public:
     // Provide location of the dataset.
     // Also provide the rank of the current process and the number of local ranks.
     // This is used to slice up the dataset for each process running on the node.
-    bool Start(
-        const std::string& data_folder_path,
-        uint32_t rank = 0,
-        uint32_t local_ranks = 1);
+    bool Start(const std::string& data_folder_path);
 
     // This stops all background work without waiting for it to complete.
     void Stop();
@@ -129,25 +193,8 @@ public:
         max_end_padding padding characters at the end of each batch row.
         This allows us to process more tokens per batch.
         More info here: https://github.com/Dao-AILab/flash-attention/issues/432
-
-        We break strings at whitespace where possible.
-
-        We remove strings that are shorter than min_string_length.
-        Very short strings may not be useful for training.
-        But it depends on your model.  Some models may keep state between
-        batches and can handle the short input.
-
-        max_end_padding: Maximum number of padding characters on the right of each batch row.
-        min_string_length: Minimum length of strings added to the batch.  This is used when
-        strings are broken up into pieces and the last piece is shorter than this length.
     */
-    void StartEpoch(
-        uint64_t seed0, uint64_t seed1, // random seed for shuffling (synchronzed between nodes)
-        uint32_t micro_batch_size, // max size of a microbatch
-        uint32_t context_size, // max size of a context
-        uint32_t max_end_padding, // concatenate short strings until there are fewer than this many padding characters at the end
-        uint32_t min_string_length, // minimum length of a string
-        uint32_t start_step = 0); // start step for the epoch
+    void StartEpoch(const EpochConfig& config);
 
     // Pause until all data from the current microbatch is ready.
     bool WaitUntilDataReady();
@@ -164,12 +211,9 @@ public:
         uint32_t* total_steps); // output: total number of steps in dataset
 
 private:
-    // The rank of the current process and the number of local ranks
-    uint32_t rank_ = 0;
-    uint32_t local_ranks_ = 1;
     uint32_t token_bytes_ = 0;
-    uint32_t max_end_padding_ = 0;
-    uint32_t min_string_length_ = 0;
+
+    EpochConfig epoch_config_;
 
     // Is Stop() called?
     std::atomic<bool> Terminated = ATOMIC_VAR_INIT(false);
@@ -193,10 +237,6 @@ private:
 
     std::atomic<bool> worker_error_ = ATOMIC_VAR_INIT(false);
 
-    uint32_t micro_batch_size_ = 0;
-    uint32_t context_size_ = 0;
-    uint32_t data_stride_ = 0;
-
     std::atomic<uint32_t> prefill_inflight_ = ATOMIC_VAR_INIT(0);
     std::atomic<bool> prefill_started_ = ATOMIC_VAR_INIT(false);
     std::atomic<bool> prefill_complete_ = ATOMIC_VAR_INIT(false);
@@ -207,11 +247,10 @@ private:
     std::mutex output_mutex_;
     std::condition_variable output_condition_;
 
-    std::vector<std::shared_ptr<Decompressor>> decompressors_;
+    // List of IO requests for the current microbatch
+    std::vector<ReadRequest> microbatch_requests_;
 
-    // If data is longer than GetTokenArray() can return, we break it into
-    // several microbatches.  This variable tracks the progress.
-    std::vector<uint32_t> output_used_;
+    std::vector<RowReadResults> row_read_results_;
 
     uint32_t current_step_ = 0;
     uint32_t total_steps_ = 0;
@@ -219,12 +258,15 @@ private:
     void ResetPrefill();
     void Prefill();
 
+    // Fill microbatch_requests_ with requests for the current microbatch.
+    // This is refactored out so that the logic is precisely the same for
+    // Prefill() and Skip().
+    int GenerateMicrobatchRequests(bool skipping);
+
     // Returns false if there is no more data to read.
     bool NextSpan(ReadRequest& request);
 
-    bool Skip(int steps);
-
-    void PostRequests(int continuations, const std::vector<ReadRequest>& requests);
+    void PostRequests();
 
     void CalculateTotalSteps();
 };

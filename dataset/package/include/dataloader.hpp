@@ -56,7 +56,3 @@ static const int kIndexEndBytes = 4 + 1 + 1 + 8;
 */
 
 static const int kDataEndBytes = 1 + 1 + 8;
-
-// Often times models are not trained with a padding token (OpenAI for example).
-// We use a special padding token to represent padding after the last token.
-static const int32_t kPaddingToken = -1; // <PAD>
