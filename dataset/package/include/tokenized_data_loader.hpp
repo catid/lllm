@@ -45,7 +45,7 @@ struct ReadRequest {
 // RowReadResults
 
 struct ReadResult {
-    std::shared_ptr<Decompressor> Decompressor;
+    std::shared_ptr<Decompressor> Decomp;
 
     BufferTarget Dest;
 };
@@ -57,15 +57,8 @@ public:
 
     uint32_t RemainingCount = 0;
 
-    std::shared_ptr<Decompressor> AddResult(
-        uint32_t read_offset,
-        uint32_t write_offset,
-        uint32_t write_count);
+    std::shared_ptr<Decompressor> AddResult(const BufferTarget& dest);
     void Reset();
-
-    // Call this before WriteOutput to check if some of the data is continued
-    // from the previous microbatch.
-    bool IsContinuation() const;
 
     // Writes to output and leaves behind any partial data
     uint32_t WriteOutput(
@@ -250,7 +243,7 @@ private:
     // List of IO requests for the current microbatch
     std::vector<ReadRequest> microbatch_requests_;
 
-    std::vector<RowReadResults> row_read_results_;
+    std::vector<std::shared_ptr<RowReadResults>> row_read_results_;
 
     uint32_t current_step_ = 0;
     uint32_t total_steps_ = 0;

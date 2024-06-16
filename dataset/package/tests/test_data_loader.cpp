@@ -17,10 +17,7 @@ bool test_data_verify() {
 bool test_data_loader() {
     TokenizedDataLoader loader;
 
-    uint32_t rank = 0;
-    uint32_t local_ranks = 1;
-
-    if (!loader.Start("test_data", rank, local_ranks)) {
+    if (!loader.Start("test_data")) {
         LOG_ERROR() << "Failed to start data loader";
         return false;
     }
@@ -30,6 +27,8 @@ bool test_data_loader() {
     uint32_t k_start_step = 0;
 
     EpochConfig config;
+    config.LocalRank = 0;
+    config.LocalRankCount = 1;
     config.MicroBatchSize = k_micro_batch_size;
     config.ContextSize = k_context_size;
     config.StartStep = k_start_step;
@@ -84,10 +83,7 @@ bool test_data_loader() {
 bool test_k_start_step(int steps) {
     TokenizedDataLoader loader1, loader2;
 
-    uint32_t rank = 0;
-    uint32_t local_ranks = 1;
-
-    if (!loader1.Start("test_data", rank, local_ranks) || !loader2.Start("test_data", rank, local_ranks)) {
+    if (!loader1.Start("test_data") || !loader2.Start("test_data")) {
         LOG_ERROR() << "Failed to start data loader";
         return false;
     }
@@ -96,6 +92,8 @@ bool test_k_start_step(int steps) {
     uint32_t k_context_size = 8192;
 
     EpochConfig config;
+    config.LocalRank = 0;
+    config.LocalRankCount = 1;
     config.MicroBatchSize = k_micro_batch_size;
     config.ContextSize = k_context_size;
 

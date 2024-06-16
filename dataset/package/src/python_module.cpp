@@ -9,13 +9,10 @@ extern "C" {
 //------------------------------------------------------------------------------
 // Data Loader
 
-void* data_loader_create(
-    const char* index_file,
-    uint32_t rank,
-    uint32_t local_ranks)
+void* data_loader_create(const char* index_file)
 {
     TokenizedDataLoader* loader = new TokenizedDataLoader();
-    if (!loader->Start(index_file, rank, local_ranks)) {
+    if (!loader->Start(index_file)) {
         delete loader;
         return nullptr;
     }

@@ -25,7 +25,7 @@ lib = ctypes.CDLL(lib_path)
 # Define the C++ function signatures
 
 # Data Loader
-lib.data_loader_create.argtypes = [ctypes.c_char_p, ctypes.c_uint32, ctypes.c_uint32]
+lib.data_loader_create.argtypes = [ctypes.c_char_p]
 lib.data_loader_create.restype = ctypes.c_void_p
 
 lib.data_loader_destroy.argtypes = [ctypes.c_void_p]
@@ -35,10 +35,12 @@ class EpochConfig(ctypes.Structure):
     _fields_ = [
         ("seed0", ctypes.c_uint64),
         ("seed1", ctypes.c_uint64),
-        ("break_at_whitespace", ctypes.c_bool),
+        ("local_rank", ctypes.c_uint32),
+        ("local_rank_count", ctypes.c_uint32),
+        ("padding_token", ctypes.c_int32),
         ("micro_batch_size", ctypes.c_uint32),
         ("context_size", ctypes.c_uint32),
-        ("min_string_length", ctypes.c_uint32),
+        ("min_data_length", ctypes.c_uint32),
         ("start_step", ctypes.c_uint32),
     ]
 
@@ -63,8 +65,8 @@ lib.data_verify.argtypes = [ctypes.c_char_p]
 lib.data_verify.restype = ctypes.c_bool
 
 class DataLoader:
-    def __init__(self, index_file, rank=0, local_ranks=1):
-        self.data_loader = lib.data_loader_create(index_file.encode(), rank, local_ranks)
+    def __init__(self, index_file):
+        self.data_loader = lib.data_loader_create(index_file.encode())
         if not self.data_loader:
             raise RuntimeError("Failed to create data loader")
 
@@ -82,10 +84,12 @@ class DataLoader:
         epoch_config = EpochConfig(
             seed0=config.seed0,
             seed1=config.seed1,
-            break_at_whitespace=config.break_at_whitespace,
+            local_rank=config.local_rank,
+            local_rank_count=config.local_rank_count,
+            padding_token=config.padding_token,
             micro_batch_size=config.micro_batch_size,
             context_size=config.context_size,
-            min_string_length=config.min_string_length,
+            min_data_length=config.min_data_length,
             start_step=config.start_step,
         )
         lib.data_loader_start_epoch(self.data_loader, ctypes.byref(epoch_config))

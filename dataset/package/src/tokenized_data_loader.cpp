@@ -12,10 +12,7 @@
 //------------------------------------------------------------------------------
 // RowReadResults
 
-std::shared_ptr<Decompressor> RowReadResults::AddResult(
-    uint32_t read_offset,
-    uint32_t write_offset,
-    uint32_t write_count)
+std::shared_ptr<Decompressor> RowReadResults::AddResult(const BufferTarget& dest)
 {
     std::lock_guard<std::mutex> lock(Lock);
 
@@ -29,7 +26,7 @@ std::shared_ptr<Decompressor> RowReadResults::AddResult(
         decompressor->Result.clear();
     }
 
-    Results.push_back({decompressor, read_offset, write_offset, write_count});
+    Results.push_back({decompressor, dest});
 
     return decompressor;
 }
@@ -40,10 +37,10 @@ void RowReadResults::Reset()
 
     // Reuse all decompressor objects
     for (auto& result : Results) {
-        Freed.push_back(result.Decompressor);
+        Freed.push_back(result.Decomp);
     }
     Results.clear();
-    NextWriteOffset = 0;
+    RemainingCount = 0;
 }
 
 uint32_t RowReadResults::WriteOutput(
@@ -60,7 +57,7 @@ uint32_t RowReadResults::WriteOutput(
     for (uint32_t i = 0; i < result_count; ++i) {
         const auto& result = Results[i];
         const auto& dest = result.Dest;
-        const int32_t* decompressed_ptr = result.Decompressor->Result.data();
+        const int32_t* decompressed_ptr = result.Decomp->Result.data();
 
         memcpy(output_row + dest.WriteOffset, decompressed_ptr + dest.ReadOffset, dest.WriteCount * sizeof(int32_t));
 
@@ -73,20 +70,19 @@ uint32_t RowReadResults::WriteOutput(
 
         // If there is more data left over:
         const uint32_t completed = dest.WriteCount + dest.ReadOffset;
-        const uint32_t decompressed_tokens = static_cast<uint32_t>( result.Decompressor->Result.size() );
+        const uint32_t decompressed_tokens = static_cast<uint32_t>( result.Decomp->Result.size() );
         if (completed < decompressed_tokens) {
-            // FIXME: REVISIT THIS
             // Prepare to read from it again on the next iteration
             ReadResult next;
-            next.Decompressor = result.Decompressor;
+            next.Decomp = result.Decomp;
             next.Dest.ReadOffset = completed;
             next.Dest.WriteOffset = 0;
             next.Dest.WriteCount = std::min(context_size, decompressed_tokens - completed);
             NextResults.push_back(next);
 
-            NextWriteOffset += next.Dest.WriteCount + 1;
+            RemainingCount = context_size - next.Dest.WriteCount;
         } else {
-            Freed.push_back(result.Decompressor);
+            Freed.push_back(result.Decomp);
         }
     }
 
@@ -362,7 +358,7 @@ void TokenizedDataLoader::StartEpoch(const EpochConfig& config)
     if (epoch_config_.StartStep > 0) {
         LOG_INFO() << "Resuming training from step " << epoch_config_.StartStep;
 
-        for (int i = 0; i < epoch_config_.StartStep; ++i) {
+        for (uint32_t i = 0; i < epoch_config_.StartStep; ++i) {
             GenerateMicrobatchRequests(true);
         }
 
@@ -383,7 +379,10 @@ void TokenizedDataLoader::ResetPrefill()
     // Resize to the number of prefill tasks
     row_read_results_.resize(epoch_config_.MicroBatchSize);
     for (uint32_t batch_index = 0; batch_index < epoch_config_.MicroBatchSize; ++batch_index) {
-        row_read_results_[batch_index].Reset();
+        if (!row_read_results_[batch_index]) {
+            row_read_results_[batch_index] = std::make_shared<RowReadResults>();
+        }
+        row_read_results_[batch_index]->Reset();
     }
 }
 
@@ -440,7 +439,7 @@ void TokenizedDataLoader::PostRequests()
 
                 total_disk_read_ += compressed_bytes;
 
-                auto& decompressor = decompressors_[request.batch_index];
+                auto decompressor = row_read_results_[request.batch_index]->AddResult(request.dest);
 
                 bool r = decompressor->Decompress(
                     compressed_data,
@@ -453,9 +452,6 @@ void TokenizedDataLoader::PostRequests()
                 }
 
                 total_decompressed_tokens_ += decompressor->Result.size();
-
-                // This is used only for skipping
-                output_used_[request.batch_index] = request.skip;
 
                 //LOG_INFO() << "Decompressed " << decompressor->Result.size() << " bytes from " << cbytes << " for shard=" << request.shard_index << " index=" << request.shard_span_index << " offset=" << offset;
 
@@ -511,7 +507,7 @@ int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
     {
         auto& row = row_read_results_[batch_index];
 
-        uint32_t next_write_offset = row.RemainingCount + 1;
+        uint32_t next_write_offset = row->RemainingCount + 1;
 
         // While there is space for data:
         while (next_write_offset < epoch_config_.ContextSize)
@@ -540,7 +536,7 @@ int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
             if (!r) {
                 LOG_ERROR() << "Failed to read span " << request.shard_span_index
                     << " from shard " << request.shard_index;
-                return;
+                return 0;
             }
 
             uint32_t write_end = request.dest.WriteOffset + original_tokens;
@@ -549,7 +545,7 @@ int TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
                 next_write_offset = epoch_config_.ContextSize; // Will break after this one
 
                 // Store remaining count for this row for next step
-                row.RemainingCount = original_tokens - request.dest.WriteCount;
+                row->RemainingCount = original_tokens - request.dest.WriteCount;
             } else {
                 request.dest.WriteCount = original_tokens;
                 next_write_offset += write_end + 1;
@@ -578,7 +574,7 @@ void TokenizedDataLoader::CalculateTotalSteps()
         ++total_steps_;
     }
 
-    // Reset state messed with by NextSpan()
+    // Reset NextSpan() state
     next_shard_index_ = 0;
     for (const auto& shard : shards_) {
         shard->EpochNextSpan = 0;
@@ -636,9 +632,9 @@ bool TokenizedDataLoader::GetTokenArray(
         int32_t* output_row = output_batch;
         auto& row = row_read_results_[batch_index];
 
-        *is_continuation = row.IsContinuation();
+        *is_continuation = row->RemainingCount > 0;
 
-        const uint32_t written = row.WriteOutput(
+        const uint32_t written = row->WriteOutput(
             output_row,
             epoch_config_.ContextSize,
             epoch_config_.PaddingToken);
