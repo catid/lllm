@@ -627,7 +627,7 @@ bool TokenizedDataLoader::GetTokenArray(
     uint32_t max_token_count = 0;
     uint32_t num_rows = 0;
 
-    for (uint32_t batch_index = 0; batch_index < epoch_config_.MicroBatchSize; ++batch_index, output_batch += epoch_config_.ContextSize)
+    for (uint32_t batch_index = 0; batch_index < epoch_config_.MicroBatchSize; ++batch_index)
     {
         int32_t* output_row = output_batch;
         auto& row = row_read_results_[batch_index];
@@ -646,6 +646,7 @@ bool TokenizedDataLoader::GetTokenArray(
         output_row += epoch_config_.ContextSize;
         ++num_rows;
         ++is_continuation;
+        output_batch += epoch_config_.ContextSize;
     }
 
     // Pad the remaining unwritten rows with padding tokens
@@ -665,7 +666,11 @@ bool TokenizedDataLoader::GetTokenArray(
     }
 
     if (num_rows == 0) {
-        LOG_INFO() << "GetTokenArray: Training data exhausted.  Disk compression: " << (total_disk_read_ / total_decompressed_tokens_) << " bytes/token";
+        double compression_ratio = 0.0;
+        if (total_decompressed_tokens_ > 0) {
+            compression_ratio = total_disk_read_ / (double)total_decompressed_tokens_;
+        }
+        LOG_INFO() << "GetTokenArray: Training data exhausted.  Disk compression: " << compression_ratio << " bytes/token";
         return false;
     }
 
