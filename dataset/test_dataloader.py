@@ -3,7 +3,7 @@ import argparse
 import yaml
 import time
 
-from cpp_dataloader import DataLoader, DataVerifier
+from cpp_dataloader import DataLoader, DataVerifier, EpochConfig
 
 def read_yaml_file(file_path):
     with open(file_path, 'r') as file:
@@ -23,11 +23,22 @@ def main(args, shard_config):
 
     print(f"Reading dataset shard {args.rank} of {shard_config['rank_count']} ranks") 
 
-    dataloader = DataLoader(args.dataset_dir, rank=args.rank, local_ranks=shard_config["rank_count"])
+    dataloader = DataLoader(args.dataset_dir)
     if not dataloader:
         raise RuntimeError("DataLoader failed to initialize")
 
-    dataloader.begin_epoch(args.seed0, args.seed1, args.batch, args.context)
+    config = EpochConfig()
+    config.seed0 = args.seed0
+    config.seed1 = args.seed1
+    config.local_rank = args.rank
+    config.local_rank_count = shard_config["rank_count"]
+    config.padding_token = -1
+    config.micro_batch_size = args.batch
+    config.context_size = args.context
+    config.min_data_length = 64
+    config.start_step = 0
+
+    dataloader.begin_epoch(config)
 
     total_microbatches = 0
 
@@ -48,7 +59,11 @@ def main(args, shard_config):
         total_microbatches += 1
 
         if total_microbatches % 5000 == 0:
-            print(f"Reading epoch data: {total_microbatches} microbatches (step={step}/{total_steps} [{step * 100.0 / total_steps}%])...")
+            t1 = time.time()
+            dt = t1 - t0
+            tps = dt / (step + 1)
+
+            print(f"Reading epoch data: {total_microbatches} microbatches (step={step}/{total_steps} [{step * 100.0 / total_steps}%]), step={tps*1000.0} msec...")
 
     t1 = time.time()
     dt = t1 - t0

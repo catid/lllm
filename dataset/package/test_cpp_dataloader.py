@@ -3,6 +3,9 @@ import time
 from cpp_dataloader import DataLoader, DataPreparation, DataVerifier, EpochConfig
 import os
 
+import numpy as np
+np.set_printoptions(threshold=np.inf)
+
 def create_folder_if_not_exists(folder_path):
     try:
         os.makedirs(folder_path, exist_ok=True)
@@ -23,10 +26,10 @@ if __name__ == "__main__":
         prep = DataPreparation(data_path, byte_tokens=False)
         
         for _ in range(8000):
-            num_tokens = random.randint(1, 20000)
+            num_tokens = random.randint(1, 10000)
             tokens = [random.randint(0, 128000) for _ in range(num_tokens)]
             prep.write_tokens(tokens)
-        
+
         prep.destroy()
         
         end_time = time.time()

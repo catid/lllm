@@ -595,7 +595,7 @@ bool TokenizedDataLoader::GenerateMicrobatchRequests(bool skipping)
                 }
             } else {
                 request.dest.WriteCount = original_tokens;
-                next_write_offset += write_end + 1;
+                next_write_offset = write_end + 1;
             }
 #if 0
             LOG_INFO() << "FIXME: request = batch_index=" << request.batch_index << " shard_index=" << request.shard_index
@@ -671,6 +671,11 @@ bool TokenizedDataLoader::GetTokenArray(
     uint32_t* step_out,
     uint32_t* total_steps_out)
 {
+#if _DEBUG
+    // In debug mode we set all tokens to 0 to make it easier to debug problems
+    memset(micro_batch_out, 0, config_.ContextSize * config_.MicroBatchSize * sizeof(uint32_t));
+#endif
+
     if (!WaitUntilDataReady()) {
         LOG_DEBUG() << "Data did not become ready";
         return false;

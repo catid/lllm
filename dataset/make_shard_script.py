@@ -66,15 +66,15 @@ def generate_master_script(hosts, world_size, args):
 def main():
     parser = argparse.ArgumentParser(description="Generate a shell script to run a Python script on multiple hosts using pdsh.")
     parser.add_argument('--hosts-file', type=str, default="hosts.txt", help="Path to the hosts file (default: hosts.txt).")
-    parser.add_argument('--dataset_user', type=str, default="HuggingFaceFW", help="Dataset user.")
-    parser.add_argument('--dataset_name', type=str, default="fineweb-edu", help="Dataset name.")
+    parser.add_argument('--dataset-user', type=str, default="HuggingFaceFW", help="Dataset user.")
+    parser.add_argument('--dataset-name', type=str, default="fineweb-edu", help="Dataset name.")
     parser.add_argument('--output-dir', type=str, default="~/dataset_shard", help="Output shard directory.")
     parser.add_argument('--source-dir', type=str, default="~/lllm/dataset", help="Source directory.")
     parser.add_argument('--conda-env', type=str, default="lllm", help="Conda environment name.")
     parser.add_argument('--conda-dir', type=str, default="~/mambaforge", help="Conda environment directory.")
     parser.add_argument('--username', type=str, default=None, help="SSH username.")
-    parser.add_argument("--just_args", action="store_true", help="Just write the args file and exit.")
-    parser.add_argument("--byte_tokens", action="store_true", help="Tokenize using byte tokens instead of word tokens.")
+    parser.add_argument("--just-args", action="store_true", help="Just write the args file and exit.")
+    parser.add_argument("--byte-tokens", action="store_true", help="Tokenize using byte tokens instead of word tokens.")
 
     args = parser.parse_args()
     

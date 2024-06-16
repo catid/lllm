@@ -59,6 +59,20 @@ bool test_data_loader() {
         LOG_INFO() << "Batch retrieved: micro_batch_size=" << micro_batch_size << ", num_tokens=" << num_tokens << ", dt_usec=" << dt_usec;
         //LOG_INFO() << "Sample data: " << output_batch[0] << " (continuation=" << (int)is_continuation[0] << ")";
 
+        std::ostringstream oss;
+        for (int i = 0; i < num_tokens; ++i) {
+            if (output_batch[i] > 0) {
+                oss << "D";
+            } else if (output_batch[i] == 0) {
+                LOG_ERROR() << "Found a zero token in the data";
+                return false;
+                oss << "0";
+            } else {
+                oss << "_";
+            }
+        }
+        LOG_INFO() << "Sample data:\n" << oss.str();
+
         //std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 

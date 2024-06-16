@@ -1,21 +1,10 @@
-# High Performance Language Model Dataloader
+# High Performance Tokenized Dataset Sharding/Loading
 
 The scripts convert downloaded HuggingFace datasets into our format by tokenizing the text and storing it in a custom format.
 
+Benchmark results:
 
-## Download the dataset to your file server
-
-Modify `download_dataset.py` script to edit the dataset location.  Download the dataset to a file server:
-
-```bash
-cd dataset
-
-conda activate lllm
-
-python download_dataset.py
-```
-
-If the process is aborted, run `rm -rf download_temp` to remove the temporary directory.
+The Fineweb-Edu 1.5T dataset sharded across 4 machines takes 570GB disk space per node.  Downloading from huggingface and sharding to disk across the whole cluster takes about 6 hours (gigabit Internet) by running one (generated) bash script on the master node.  Takes 2 hours if the files are on local NAS.
 
 
 ## [Optional] Install the C++ dataloader package
@@ -36,8 +25,10 @@ cd dataset
 
 conda activate lllm
 
-python make_shard_script.py --dataset-dir /mnt/Media/datasets/fineweb-edu --output-dir ~/dataset_shard
+python make_shard_script.py --dataset-user "HuggingFaceFW" --dataset-name "fineweb-edu" --output-dir ~/dataset_shard
 ```
+
+See the `make_shard_script.py --help` for more options.
 
 This produces `run_all_hosts.sh`.  Run the dataset sharding job across the cluster:
 
@@ -49,4 +40,8 @@ sudo apt install pdsh parallel
 
 If you hit CTRL+C it will abort the remote jobs.
 
-After this finishes (takes about ~2.5 hours for 4 machines), you'll have a directory called `~/dataset_shard` with the sharded dataset on each node.  Now you're ready to start training language models.
+This takes about ~6 hours for 4 machines on gigabit Internet using Fineweb-Edu 1.5T.
+
+After this finishes, you'll have a directory called `~/dataset_shard` with the sharded dataset on each node.
+
+Now you're ready to start training language models.  Proceed to the `train/` directory for the next steps.
