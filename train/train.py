@@ -20,16 +20,13 @@ from torch.distributed.fsdp.api import init_process_group
 
 import torch.distributed as dist
 
-from torch.cuda.amp import GradScaler, autocast
-
 from cpp_dataloader import DataLoader, DataVerifier, EpochConfig
-from mora import replace_linear_with_mora
 
 import schedulefree
+
 from logger_tt import setup_logging, logger
 
 setup_logging(use_multiprocessing="fork")
-
 
 # Enable cuDNN benchmarking to improve online performance
 torch.backends.cudnn.benchmark = True
@@ -37,7 +34,6 @@ torch.backends.cudnn.benchmark = True
 # Disable profiling to speed up training
 torch.autograd.profiler.emit_nvtx(False)
 torch.autograd.profiler.profile(False)
-
 
 def is_main_process():
     return dist.get_rank() == 0
@@ -48,46 +44,81 @@ def get_true_random_32bit_positive_integer():
     random_int = int.from_bytes(bytes(random_bytes), byteorder='big')
     return random_int
 
-def synchronize_seed(local_rank, rank, seed=-1):
-    if seed < 0:
-        seed = get_true_random_32bit_positive_integer()
+def synchronize_seed(args):
+    if args.seed < 0:
+        args.seed = get_true_random_32bit_positive_integer()
 
-    if rank == 0:
-        seed_tensor = torch.tensor(seed, dtype=torch.long)  # A tensor with the value to be sent
+    if args.global_rank == 0:
+        seed_tensor = torch.tensor(args.seed, dtype=torch.long)  # A tensor with the value to be sent
     else:
         seed_tensor = torch.zeros(1, dtype=torch.long)  # A tensor to receive the value
 
-    seed_tensor = seed_tensor.cuda(local_rank)
-
     dist.broadcast(tensor=seed_tensor, src=0)
 
+    # Seed PRNGs using the shared seed
     seed = int(seed_tensor.item())
-
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
 
-    logger.info(f"Using seed: {seed} for shard_id={rank}")
+    logger.info(f"Using seed: {seed} for shard_id={args.global_rank}")
     return seed
 
-def delete_folder_contents(folder_path):
+def recreate_folder(folder_path):
     if os.path.exists(folder_path):
         shutil.rmtree(folder_path)
     os.makedirs(folder_path)
 
-def train_one_step(optimizer, model_engine, dataloader):
-    model_engine.train()
+def save_checkpoint(args, model, optimizer, checkpoint_info):
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    filename = f"checkpoint_epoch_{checkpoint_info["epoch"]}_step_{checkpoint_info["resume_step"]}.pth"
+    checkpoint_path = os.path.join(args.output_dir, filename)
+    checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'info': checkpoint_info
+    }
+    torch.save(checkpoint, checkpoint_path)
+
+    checkpoint_info["checkpoint_path"] = checkpoint_path
+
+    yml_path = os.path.join(args.output_dir, "latest.yml")
+    with open(yml_path, 'w') as file:
+        yaml.dump(checkpoint_info, file, default_flow_style=False)
+
+    logger.info(f"Checkpoint saved: {checkpoint_path}")
+
+def load_checkpoint(args, model, optimizer):
+    try:
+        yml_path = os.path.join(args.output_dir, "latest.yml")
+        with open(args_path, 'r') as file:
+            checkpoint_info = yaml.safe_load(yml_path)
+        checkpoint_path = checkpoint_info["checkpoint_path"]
+
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        checkpoint_info = checkpoint['info']
+    except Exception as e:
+        logger.info(f"Error loading checkpoint: {e}")
+        return None
+    return checkpoint_info
+
+def train_one_step(args, optimizer, model, dataloader):
+    model.train()
+    optimizer.zero_grad()
 
     batch, is_cont, step, total_steps = dataloader.get_micro_batch()
 
     if batch is None:
         return None, None
 
-    input_ids = torch.from_numpy(batch).to(torch.long).to(model_engine.device)
+    input_ids = torch.from_numpy(batch).to(torch.long).to(model.device)
     labels = input_ids[..., :-1].contiguous()
     targets = input_ids[..., 1:].contiguous()
 
-    logits, loss = model_engine(labels, targets)
+    logits, loss = model(labels, targets)
     tokens_trained = torch.sum(targets != -1).item()
 
     optimizer.zero_grad()
@@ -100,50 +131,32 @@ def train_one_step(optimizer, model_engine, dataloader):
 
     return loss.item(), tokens_trained, correct_tokens_count
 
-def save_deepspeed_model_engine(model_engine, fp16, args):
-    # Write output .pth file
-    saved_state_dict = model_engine.state_dict()
-
-    # Remove module. prefix from keys
-    fixed_state_dict = {key.replace("module.", ""): value for key, value in saved_state_dict.items()}
-
-    # Add our data to the state dict to facilitate the evaluation script
-    fixed_state_dict['lllm'] = {
-        'fp16': fp16,
-    }
-
-    torch.save(fixed_state_dict, args.output_model)
-
 def main(args, shard_config):
-    t0 = time.time()
+    if is_main_process():
+        logger.info(f"Arguments: {args}")
 
-    dist.init_process_group(backend='nccl')
+    logger.info(f"Node local_rank={args.local_rank} global_rank={args.global_rank} local_world_size={args.local_world_size} world_size={args.world_size}")
+
+    dist.init_process_group(backend='nccl', rank=args.global_rank, world_size=args.world_size)
+    torch.cuda.set_device(args.local_rank)
 
     cfg = LatentLanguageConfig()
     cfg.n_vocab = shard_config["n_vocab"]
     cfg.block_size = args.context
     model = LatentLanguage(cfg)
 
-    model = replace_linear_with_mora(model)
-
     optimizer = schedulefree.AdamWScheduleFree(
         model.parameters(),
         lr=args.lr,
         weight_decay=args.weight_decay)
 
-    # FIXME
-    #ds_config["fp16"]["enabled"] = not args.fp32
-
-    # Remove deepspeed_config from the args (we pass a dict into deepspeed.initialize)
-    args.deepspeed_config = None
+    if args.compile:
+        model = torch.compile(model, dynamic=True, fullgraph=False)
 
     model = FSDP(model)
 
-    if is_main_process():
-        logger.info(f"Arguments: {args}")
-
     if args.verify_dataset:
-        log_all("Verifying dataset... (should take about one minute per 0.4T tokens using an SSD)")
+        logger.info("Verifying dataset... (should take about one minute per 0.4T tokens using an SSD)")
 
         if is_main_process():
             is_valid = DataVerifier.verify(args.dataset_dir)
@@ -155,21 +168,9 @@ def main(args, shard_config):
         if not os.path.exists(args.output_dir):
             os.makedirs(args.output_dir)
 
-    comm.barrier()
+    dist.barrier()
 
-    fp16 = model_engine.fp16_enabled()
-    log_0(f'model_engine.fp16_enabled={fp16}')
-
-    rank = model_engine.local_rank
-    shard_id = model_engine.global_rank
-    num_gpus = model_engine.world_size
-    train_batch_size = model_engine.train_batch_size()
-    data_loader_batch_size = model_engine.train_micro_batch_size_per_gpu()
-    steps_per_print = model_engine.steps_per_print()
-
-    log_all(f"Node rank={rank}, num_shards={num_gpus}, shard_id={shard_id}, train_batch_size={train_batch_size}, data_loader_batch_size={data_loader_batch_size}, steps_per_print={steps_per_print}")  
-
-    seed = synchronize_seed(rank, shard_id, args.seed)
+    args.seed = synchronize_seed(args)
 
     # Weights & Biases
     if args.wandb and is_main_process():
@@ -178,27 +179,24 @@ def main(args, shard_config):
         wandb.init(project=args.project, name=args.name, config=args)
         wandb.run.log_code = False
 
-    if args.compile:
-        forward_and_loss = torch.compile(forward_and_loss, dynamic=True, fullgraph=False)
-
     step = 0
     epoch = 0
     tokens = 0
 
     if args.resume:
-        _, client_state = model_engine.load_checkpoint(load_dir=args.output_dir)
-        if client_state is not None:
-            step = client_state['step']
-            epoch = client_state['epoch']
-            tokens = client_state['tokens']
-            log_all(f"Loaded checkpoint at step={step} epoch={epoch}")
+        checkpoint_info = load_checkpoint(args, model, optimizer)
+        if checkpoint_info is not None:
+            step = checkpoint_info["resume_step"]
+            epoch = checkpoint_info["epoch"]
+            tokens = checkpoint_info["tokens"]
+            logger.info(f"Loaded checkpoint at step={step} epoch={epoch}")
         else:
-            log_all("No checkpoint found - Starting training from scratch")
+            logger.info("No checkpoint found - Starting training from scratch")
     else:
-        log_0("Resetting training - deleting output directory")
-        if rank == 0:
-            delete_folder_contents(args.output_dir)
-        comm.barrier()
+        if args.local_rank == 0:
+            logger.info("Resetting training - deleting output directory")
+            recreate_folder(args.output_dir)
+        dist.barrier()
 
     # DataLoader
     dataloader = DataLoader(args.dataset_dir)
@@ -206,18 +204,15 @@ def main(args, shard_config):
         raise RuntimeError("DataLoader failed to initialize")
 
     while True:
-        # This seed is synchronized between ranks so they do not reuse the same data
-        seed2 = epoch
-
         config = EpochConfig()
-        config.seed0 = seed
-        config.seed1 = seed2
-        config.local_rank = rank
+        config.seed0 = args.seed
+        config.seed1 = epoch
+        config.local_rank = args.local_rank
         config.local_rank_count = shard_config["rank_count"]
         config.padding_token = -1
-        config.micro_batch_size = data_loader_batch_size
+        config.micro_batch_size = args.microbatch
         config.context_size = args.context
-        config.min_data_length = 64
+        config.min_data_length = args.min_data_length
         config.start_step = step
 
         dataloader.begin_epoch(config)
@@ -225,22 +220,23 @@ def main(args, shard_config):
         while True:
             start_time = time.time()
 
-            train_loss, train_tokens, correct_tokens_count = train_one_step(optimizer, model_engine, dataloader)
+            train_loss, train_tokens, correct_tokens_count = train_one_step(
+                args, optimizer, model, dataloader)
 
             if train_loss is None:
-                log_all(f"Epoch {epoch} data exhausted on rank {rank} at step={step}")
+                logger.info(f"Epoch {epoch} data exhausted on global_rank={args.global_rank} at step={step}")
                 break
 
             end_time = time.time()
             step_time = end_time - start_time
 
             # Sync variables between ranks
-            avg_train_loss = torch.tensor(train_loss).cuda(rank)
-            sum_tokens = torch.tensor(train_tokens).cuda(rank)
-            sum_correct = torch.tensor(correct_tokens_count).cuda(rank)
-            comm.all_reduce(tensor=avg_train_loss, op=comm.ReduceOp.AVG)
-            comm.all_reduce(tensor=sum_tokens, op=comm.ReduceOp.SUM)
-            comm.all_reduce(tensor=sum_correct, op=comm.ReduceOp.SUM)
+            avg_train_loss = torch.tensor(train_loss)
+            sum_tokens = torch.tensor(train_tokens)
+            sum_correct = torch.tensor(correct_tokens_count)
+            dist.all_reduce(tensor=avg_train_loss, op=dist.ReduceOp.AVG)
+            dist.all_reduce(tensor=sum_tokens, op=dist.ReduceOp.SUM)
+            dist.all_reduce(tensor=sum_correct, op=dist.ReduceOp.SUM)
             avg_train_loss = avg_train_loss.item()
             sum_tokens = sum_tokens.item()
             sum_correct = sum_correct.item()
@@ -250,61 +246,49 @@ def main(args, shard_config):
             correct_pct = sum_correct * 100.0 / sum_tokens
 
             if is_main_process():
-                log_0(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec correct={correct_pct:.2f}% Tokens={tokens/1000000.0:.2f}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
+                logger.info(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec correct={correct_pct:.2f}% Tokens={tokens/1000000.0:.2f}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
 
             step += 1
 
             if step % args.checkpoint_interval == 0:
-                if args.wandb:
-                    wandb.log({
-                        "avg_train_loss": avg_train_loss,
-                        "epoch": epoch,
-                        "wallclock_time": step_time,
-                        "lr": optimizer.param_groups[0]['lr'],
-                        "tokens": tokens,
-                        "step": step
-                    })
-
-                client_state = {
+                checkpoint_info = {
                     'train_version': 1,
                     'avg_train_loss': avg_train_loss,
-                    'fp16': fp16,
                     'args': args,
                     'epoch': epoch,
                     'step': step,
-                    'tokens': tokens
+                    'tokens': tokens,
+                    'wallclock_time': step_time,
+                    'lr': optimizer.param_groups[0]['lr'],
                 }
 
-                model_engine.save_checkpoint(save_dir=args.output_dir, client_state=client_state)
+                if args.wandb:
+                    wandb.log(checkpoint_info)
 
-        log_all(f"Epoch {epoch} complete on rank {rank} - Waiting for peers to complete.")
+                save_checkpoint(args, model, optimizer, checkpoint_info)
 
-        comm.barrier()
+        logger.info(f"Epoch {epoch} complete on rank {args.global_rank}")
+
+        dist.barrier()
 
         epoch += 1
-
-def read_yaml_file(file_path):
-    with open(file_path, 'r') as file:
-        data = yaml.safe_load(file)
-    return data
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training")
 
-    # Deepspeed
-    parser.add_argument("--local_rank", type=int, default=-1)
-    parser.add_argument("--output-dir", type=str, default="checkpoints", help="Path to the latest checkpoint for resuming")
+    # Config
+    parser.add_argument("--output-dir", type=str, default="checkpoints", help="Path to model checkpoints for resuming") 
     parser.add_argument("--resume", action="store_true", help="Resume training from previous checkpoint")
-    parser.add_argument("--output-model", type=str, default="cifar10.pth", help="Output model file name")
+    parser.add_argument("--seed", type=int, default=0, help="Seed for random numbers.  Set to -1 to pick a fully random seed")
+    parser.add_argument("--compile", action="store_true", help="Enable torch.compile")
 
     # Dataset
     parser.add_argument("--dataset-dir", type=str, default="~/dataset_shard", help="Dataset directory")
+    parser.add_argument("--holdout-dir", type=str, default="~/holdout_shard", help="Holdout directory")
     parser.add_argument("--verify-dataset", action="store_true", help="Verify the dataset before training")
-
-    # Misc
-    parser.add_argument("--seed", type=int, default=0, help="Seed for random numbers.  Set to -1 to pick a fully random seed")
-    parser.add_argument("--compile", action="store_true", help="Enable torch.compile")
-    parser.add_argument("--fp32", action='store_true', help="Enable fp32 training (fp16 default)")
+    parser.add_argument("--context", type=int, default=4096, help="Context size for each microbatch")
+    parser.add_argument("--min-data-length", type=int, default=64, help="Minimum data length to use for training")
+    parser.add_argument("--microbatch", type=int, default=8, help="Microbatch size")
 
     # Weights & Biases
     parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases")
@@ -315,30 +299,35 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.004, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
-    parser.add_argument("--context", type=int, default=4096, help="Context size for each microbatch")
 
     # Checkpointing
     parser.add_argument("--checkpoint-interval", type=int, default=1000, help="Steps between checkpoints")
 
-    parser = deepspeed.add_config_arguments(parser)
-
     args = parser.parse_args()
 
-    if args.deepspeed_config==None or len(args.deepspeed_config)==0:
-        args.deepspeed_config = "deepspeed_config.json"
+    # Get environment variables from torchrun
+    args.global_rank = int(os.getenv("RANK", "0"))
+    args.local_rank = int(os.getenv("LOCAL_RANK", "0"))
+    args.world_size = int(os.getenv("WORLD_SIZE", "1"))
+    args.local_world_size = int(os.getenv("LOCAL_WORLD_SIZE", "1"))
 
     args.dataset_dir = os.path.expanduser(args.dataset_dir)
 
     if not os.path.exists(args.dataset_dir):
         raise RuntimeError(f"Dataset directory {args.dataset_dir} does not exist")
+    if not os.path.exists(args.holdout_dir):
+        raise RuntimeError(f"Holdout directory {args.holdout_dir} does not exist")
 
     args_path = os.path.join(args.dataset_dir, "args.yml")
-    shard_config = read_yaml_file(args_path)
+    with open(args_path, 'r') as file:
+        shard_config = yaml.safe_load(file)
 
     local_ranks = torch.cuda.device_count()
+    if local_ranks != args.local_world_size:
+        raise RuntimeError(f"Number of GPUs ({local_ranks}) does not match torchrun local_world_size ({args.local_world_size})")
     if local_ranks != shard_config["rank_count"]:
-        raise RuntimeError(f"Number of GPUs ({local_ranks}) does not rank_count from shard config ({shard_config['rank_count']})")
+        raise RuntimeError(f"Number of GPUs ({local_ranks}) does not match rank_count from shard config ({shard_config['rank_count']})")
 
-    log_all(f"Shard config: {shard_config}")
+    logger.info(f"Shard config: {shard_config}")
 
     main(args, shard_config)

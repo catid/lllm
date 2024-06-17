@@ -8,6 +8,7 @@ causal-conv1d
 mamba_ssm
 git+https://github.com/sustcsonglin/flash-linear-attention
 logger_tt
+torch-optimi
 
 # Dataset dependencies
 build
