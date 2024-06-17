@@ -9,6 +9,8 @@ import random, time
 import shutil
 import argparse
 import yaml
+import math
+import copy
 
 import wandb
 
@@ -16,7 +18,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType, FullStateDictConfig, OptimStateDictConfig
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.api import init_process_group
+from torch.distributed.fsdp.api import init_process_group, destroy_process_group
 
 import torch.distributed as dist
 
@@ -107,29 +109,61 @@ def load_checkpoint(args, model, optimizer):
 
 def train_one_step(args, optimizer, model, dataloader):
     model.train()
-    optimizer.zero_grad()
+    loss_accum = 0.0
 
-    batch, is_cont, step, total_steps = dataloader.get_micro_batch()
+    for grad_accum_step in range(args.grad_accum):
+        batch, is_cont, step, total_steps = dataloader.get_micro_batch()
 
-    if batch is None:
-        return None, None
+        if batch is None:
+            return None, None
 
-    input_ids = torch.from_numpy(batch).to(torch.long).to(model.device)
-    labels = input_ids[..., :-1].contiguous()
-    targets = input_ids[..., 1:].contiguous()
+        input_ids = torch.from_numpy(batch).to(torch.long).to(model.device)
+        labels = input_ids[..., :-1].contiguous()
+        targets = input_ids[..., 1:].contiguous()
 
-    logits, loss = model(labels, targets)
-    tokens_trained = torch.sum(targets != -1).item()
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            logits, loss = model(labels, targets)
+            loss = loss / args.grad_accum
+            loss_accum += loss.detach()
 
-    optimizer.zero_grad()
-    loss.backward()
+        # TBD: Only for DDP
+        model.require_backward_grad_sync = (grad_accum_step + 1 == args.grad_accum)
+        loss.backward()
+
+        tokens_trained = torch.sum(targets != -1).item()
+
+        # FIXME
+        predictions = torch.argmax(logits, dim=-1)
+        correct_predictions = (predictions == targets) & (targets != -1)
+        correct_tokens_count = torch.sum(correct_predictions).item()
+
+    # TBD: Only for DDP
+    dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
+
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+
+    lr = get_lr(args, step)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
     optimizer.step()
-
-    predictions = torch.argmax(logits, dim=-1)
-    correct_predictions = (predictions == targets) & (targets != -1)
-    correct_tokens_count = torch.sum(correct_predictions).item()
+    optimizer.zero_grad(set_to_none=True)
 
     return loss.item(), tokens_trained, correct_tokens_count
+
+# learning rate decay scheduler (linear warmup and warmdown)
+def get_lr(args, step):
+    assert step <= args.steps
+    # 1) linear warmup for warmup_iters steps
+    if step < args.warmup:
+        return args.lr * (step+1) / args.warmup
+    # 2) constant lr for a while
+    elif step < args.steps - args.cooldown:
+        return args.lr
+    # 3) 1-sqrt cooldown
+    else:
+        decay_ratio = (step - (args.steps - args.cooldown)) / args.cooldown
+        return args.lr * (1 - math.sqrt(decay_ratio))
 
 def main(args, shard_config):
     if is_main_process():
@@ -201,7 +235,10 @@ def main(args, shard_config):
     # DataLoader
     dataloader = DataLoader(args.dataset_dir)
     if not dataloader:
-        raise RuntimeError("DataLoader failed to initialize")
+        raise RuntimeError("Dataloader failed to initialize")
+    validation_dataloader = DataLoader(args.holdout_dir)
+    if not validation_dataloader:
+        raise RuntimeError("Validation dataloader failed to initialize")
 
     while True:
         config = EpochConfig()
@@ -214,8 +251,11 @@ def main(args, shard_config):
         config.context_size = args.context
         config.min_data_length = args.min_data_length
         config.start_step = step
-
         dataloader.begin_epoch(config)
+
+        validation_config = copy.deepcopy(config)
+        validation_config.start_step = 0 # 
+        validation_dataloader.begin_epoch(validation_config)
 
         while True:
             start_time = time.time()
@@ -289,6 +329,7 @@ if __name__ == "__main__":
     parser.add_argument("--context", type=int, default=4096, help="Context size for each microbatch")
     parser.add_argument("--min-data-length", type=int, default=64, help="Minimum data length to use for training")
     parser.add_argument("--microbatch", type=int, default=8, help="Microbatch size")
+    parser.add_argument("--grad-accum", type=int, default=2, help="Gradient accumulation steps")
 
     # Weights & Biases
     parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases")
@@ -296,9 +337,13 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str, default="my_project", help="Collection of experiments on wandb")
 
     # Hyperparameters
-    parser.add_argument("--lr", type=float, default=0.004, help="Learning rate for training")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
+    parser.add_argument("--steps", type=int, default=1000000, help="Total steps for training")
+    parser.add_argument("--warmup", type=int, default=1000, help="Warmup steps")
+    parser.add_argument("--cooldown", type=int, default=100000, help="Cooldown steps")
+    parser.add_argument("--grad-clip", type=float, default=1.0, help="Maximum gradient magnitude")
 
     # Checkpointing
     parser.add_argument("--checkpoint-interval", type=int, default=1000, help="Steps between checkpoints")
@@ -331,3 +376,6 @@ if __name__ == "__main__":
     logger.info(f"Shard config: {shard_config}")
 
     main(args, shard_config)
+
+    destroy_process_group()
+

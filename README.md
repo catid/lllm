@@ -32,37 +32,8 @@ Training TODO:
 Karpathy video take-aways:
 * Periodically print validation loss / example output
 * 1.5M tokens/second training is the benchmark to beat
-* gradient accumulation up to 0.5M batch size, up to 1M for 1B parameter models
 * nicer numbers (round out the vocab size)
 * Use [Eluether harness to eval model](https://github.com/EleutherAI/lm-evaluation-harness)
-
-```python
-    # do one step of the optimization
-    model.train()
-    optimizer.zero_grad()
-    loss_accum = 0.0
-    for micro_step in range(grad_accum_steps):
-        x, y = train_loader.next_batch()
-        x, y = x.to(device), y.to(device)
-        with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
-            logits, loss = model(x, y)
-        # we have to scale the loss to account for gradient accumulation,
-        # because the gradients just add on each successive backward().
-        # addition of gradients corresponds to a SUM in the objective, but
-        # instead of a SUM we want MEAN. Scale the loss here so it comes out right
-        loss = loss / grad_accum_steps
-        loss_accum += loss.detach()
-        if ddp:
-            model.require_backward_grad_sync = (micro_step == grad_accum_steps - 1)
-        loss.backward()
-    if ddp:
-        dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
-    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-```
-
-Further improvements from [community](https://github.com/KellerJordan/modded-nanogpt):
-* 3x max learning rate
-* Trapezoidal LR schedule: https://arxiv.org/pdf/2405.18392
 
 Model TODO:
 * Mamba2 interleaved with SWA layers
