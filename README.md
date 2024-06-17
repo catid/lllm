@@ -24,7 +24,6 @@ Follow the instructions in the `train/` directory.
 # Ideas
 
 Dataloader TODO:
-* Concatenate short strings together
 * Add validation loss split to the sharding script, taking a random subset from each parquet file
 * Windowed attention code: https://github.com/Dao-AILab/flash-attention/blob/0cb595ad943ac7539c49825f520659c0f61d4f40/flash_attn/bert_padding.py#L125
 

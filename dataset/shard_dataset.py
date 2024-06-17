@@ -15,13 +15,13 @@ from logger_tt import setup_logging, logger
 
 setup_logging(use_multiprocessing="fork")
 
-def save_args_to_yaml(args, additional_keys=None):
+def save_args_to_yaml(args, dir, additional_keys=None):
     args_dict = vars(args)
     
     if additional_keys:
         args_dict.update(additional_keys)
     
-    args_file = os.path.join(args.output_dir, "args.yml")
+    args_file = os.path.join(dir, "args.yml")
     
     with open(args_file, 'w') as f:
         yaml.dump(args_dict, f, default_flow_style=False)
@@ -89,8 +89,13 @@ def print_progress_bar(iteration, total, start_time, bar_length=40):
     bar = '#' * bar_filled + '-' * (bar_length - bar_filled)
     logger.info(f"[{bar}] {elapsed_time_str} / {eta_str} {percent}%")
 
-def tokenizer_worker(encoding, queue, output_queue):
-    tokenizer = tiktoken.get_encoding(encoding)
+def tokenizer_worker(args, queue, output_queue, holdout_queue):
+    tokenizer = tiktoken.get_encoding(args.encoding)
+
+    rate = args.holdout_rate / 100.0
+    total_tokens = 0
+    holdout_expected_tokens = 0
+    holdout_tokens = 0
 
     while True:
         text = queue.get()
@@ -100,7 +105,30 @@ def tokenizer_worker(encoding, queue, output_queue):
             break
 
         tokenized_text = tokenizer.encode(text, disallowed_special=())
-        output_queue.put(tokenized_text)
+
+        total_tokens += len(tokenized_text)
+        holdout_expected_tokens = int(total_tokens * rate)
+
+        if holdout_tokens < holdout_expected_tokens:
+            holdout_tokens += len(tokenized_text)
+            holdout_queue.put(tokenized_text)
+        else:
+            output_queue.put(tokenized_text)
+
+def holdout_worker(args, holdout_queue):
+    holdout_prep = DataPreparation(args.holdout_dir, byte_tokens=args.byte_tokens)
+
+    while True:
+        text = holdout_queue.get()
+        if text is None:
+            logger.info(f"Sentinel value received in holdout worker.  Putting sentinel value in output queue...")
+            break
+
+        holdout_prep.write_tokens(text)
+
+    logger.info(f"Holdout work completed.  Shutting down holdout pipeline...")
+    holdout_prep.destroy()
+    logger.info(f"Holdout shutdown complete.")
 
 def delete_folder_contents(folder_path):
     if os.path.exists(folder_path):
@@ -229,16 +257,18 @@ def download_worker(filename_queue, download_queue, args):
 
 def main():
     parser = argparse.ArgumentParser(description="Read and process shards of a Parquet file.")
-    parser.add_argument('--dataset_user', type=str, default="HuggingFaceFW", help="Dataset user.")
-    parser.add_argument('--dataset_name', type=str, default="fineweb-edu", help="Dataset name.")
-    parser.add_argument('--rank_start', type=int, default=0, help="First rank for this node.")
-    parser.add_argument('--rank_count', type=int, default=1, help="Number of shards for this node.")
-    parser.add_argument('--world_size', type=int, default=1, help="Total number of shards.")
-    parser.add_argument('--output_dir', type=str, default="dataset_shard", help="Output directory.")
+    parser.add_argument('--dataset-user', type=str, default="HuggingFaceFW", help="Dataset user.")
+    parser.add_argument('--dataset-name', type=str, default="fineweb-edu", help="Dataset name.")
+    parser.add_argument('--rank-start', type=int, default=0, help="First rank for this node.")
+    parser.add_argument('--rank-count', type=int, default=1, help="Number of shards for this node.")
+    parser.add_argument('--world-size', type=int, default=1, help="Total number of shards.")
+    parser.add_argument('--output-dir', type=str, default="dataset_shard", help="Output directory.")
     parser.add_argument('--encoding', type=str, default="o200k_base", help="Tiktoken encoding.")
-    parser.add_argument("--just_args", action="store_true", help="Just write the args file and exit.")
-    parser.add_argument("--byte_tokens", action="store_true", help="Tokenize using byte tokens instead of word tokens.")
-    parser.add_argument('--num_workers', type=int, default=4, help="Number of worker processes.")
+    parser.add_argument('--just-args', action="store_true", help="Just write the args file and exit.")
+    parser.add_argument('--byte-tokens', action="store_true", help="Tokenize using byte tokens instead of word tokens.")
+    parser.add_argument('--num-workers', type=int, default=4, help="Number of worker processes.")
+    parser.add_argument('--holdout-dir', type=str, default="holdout_shard", help="Output directory for holdout set.")
+    parser.add_argument('--holdout-rate', type=float, default=0.1, help="Percentage to use for holdout set.")
 
     args = parser.parse_args()
 
@@ -246,6 +276,7 @@ def main():
         raise RuntimeError("Your --rank_count parameter must match the number of GPUs. Check your `hosts.txt` file configuration.")
 
     delete_folder_contents(args.output_dir)
+    delete_folder_contents(args.holdout_dir)
 
     # Write some extra keys to the args file
     tokenizer = tiktoken.get_encoding(args.encoding)
@@ -255,7 +286,8 @@ def main():
         "n_vocab": n_vocab
     }
 
-    save_args_to_yaml(args, extra_keys)
+    save_args_to_yaml(args, args.output_dir, extra_keys)
+    save_args_to_yaml(args, args.holdout_dir, extra_keys)
 
     if args.just_args:
         logger.info("Just wrote the args file. Exiting.")
@@ -294,12 +326,16 @@ def main():
     process = Process(target=read_parquet_files, args=(shard_file_count, download_queue, tokenizer_queue))
     process.start()
 
+    holdout_queue = Queue(maxsize=128)
+    holdout_process = Process(target=holdout_worker, args=(args, holdout_queue)) 
+    holdout_process.start()
+
     out_queue = Queue(maxsize=128)
 
     # Create a pool of tokenizer worker processes
     pool = []
     for _ in range(4):
-        p = Process(target=tokenizer_worker, args=(args.encoding, tokenizer_queue, out_queue))
+        p = Process(target=tokenizer_worker, args=(args, tokenizer_queue, out_queue, holdout_queue))
         p.start()
         pool.append(p)
 
@@ -331,6 +367,11 @@ def main():
     logger.info(f"\nWaiting for parquet reader to finish...\n")
 
     process.join()
+
+    logger.info(f"\nWaiting for holdout worker to finish...\n")
+
+    holdout_queue.put(None)
+    holdout_process.join()
 
     logger.info(f"\nWaiting for dataset preparation to finish...\n")
 

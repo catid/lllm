@@ -28,13 +28,14 @@ def generate_master_script(hosts, world_size, args):
     rank_start = 0
     for hostname, rank_count in hosts:
         command_parts = [
-            f"{args.conda_dir}/envs/{args.conda_env}/bin/python {args.source_dir}/shard_dataset.py",
-            f"--dataset_user {args.dataset_user}",
-            f"--dataset_name {args.dataset_name}",
-            f"--rank_start {rank_start}",
-            f"--rank_count {rank_count}",
-            f"--world_size {world_size}",
-            f"--output_dir {args.output_dir}"
+            f"\"{args.conda_dir}/envs/{args.conda_env}/bin/python\" \"{args.source_dir}/shard_dataset.py\"", 
+            f"--dataset-user \"{args.dataset_user}\"",
+            f"--dataset-name \"{args.dataset_name}\"",
+            f"--rank-start {rank_start}",
+            f"--rank-count {rank_count}",
+            f"--world-size {world_size}",
+            f"--holdout-dir \"{args.holdout_dir}\"",
+            f"--holdout-rate {args.holdout_rate}"
         ]
         if args.just_args:
             command_parts.append("--just_args")
@@ -75,6 +76,8 @@ def main():
     parser.add_argument('--username', type=str, default=None, help="SSH username.")
     parser.add_argument("--just-args", action="store_true", help="Just write the args file and exit.")
     parser.add_argument("--byte-tokens", action="store_true", help="Tokenize using byte tokens instead of word tokens.")
+    parser.add_argument('--holdout-dir', type=str, default="holdout_shard", help="Output directory for holdout set.")
+    parser.add_argument('--holdout-rate', type=float, default=0.1, help="Percentage to use for holdout set.")
 
     args = parser.parse_args()
     
