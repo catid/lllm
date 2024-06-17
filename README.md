@@ -24,32 +24,14 @@ Follow the instructions in the `train/` directory.
 # Ideas
 
 Dataloader TODO:
-* Windowed attention code: https://github.com/Dao-AILab/flash-attention/blob/0cb595ad943ac7539c49825f520659c0f61d4f40/flash_attn/bert_padding.py#L125
-
-Training TODO:
-* Get FSDP training working, and experiment with settings
-
-Karpathy video take-aways:
-* Periodically print validation loss / example output
-* 1.5M tokens/second training is the benchmark to beat
-* nicer numbers (round out the vocab size)
-* Use [Eluether harness to eval model](https://github.com/EleutherAI/lm-evaluation-harness)
-
-Model TODO:
-* Mamba2 interleaved with SWA layers
-* SWA + Primer Spatial D-Conv 3x1: https://arxiv.org/pdf/2109.08668v2 (Figure 4)
-* FFN layers: https://github.com/BlinkDL/RWKV-LM/blob/c2edfdc22a729b5f0cb896c99052c5c28902359a/RWKV-v5/src/model.py#L716
-* But gate the FFN output per head rather than per float, and also gate the next layer per head via mask.
-* Produce 4 tokens at once using 4x MLP heads
+* Add support for returning the list of concatenated samples in flash_attn format
 
 Dataloader future improvements:
 * RHO-loss for the dataset using LLaMA-3 8B to provide reference loss for each token - need to convert to our tokenizer via approximation
 
 Training future experiments:
-* Keep training context size at 4096 tokens but vary the batch size during training.
-* Gradient normalization: for p in model.parameters(): p.grad = p.grad / (p.grad.norm() + 1e-6)
-* Can this replace layer normalization?
-* Switch to optimi https://optimi.benjaminwarner.dev/
+* Try optimi https://optimi.benjaminwarner.dev/
+* AdaLOMO
 
 FFN experiments:
 * Sharing FFN weights onion-style https://arxiv.org/abs/2104.06022

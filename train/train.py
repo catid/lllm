@@ -1,3 +1,9 @@
+# TODO:
+# * Get FSDP training working
+# * Periodically print validation loss / example output
+# * 1.5M tokens/second training is the benchmark to beat
+# * Use [Eluether harness to eval model](https://github.com/EleutherAI/lm-evaluation-harness)
+
 import os
 
 from model.model import LatentLanguage, LatentLanguageConfig
@@ -39,6 +45,11 @@ torch.autograd.profiler.profile(False)
 
 def is_main_process():
     return dist.get_rank() == 0
+
+def round_up_to_next_multiple_of_128(x):
+    if x % 128 == 0:
+        return x
+    return x + (128 - (x % 128))
 
 def get_true_random_32bit_positive_integer():
     random_bytes = bytearray(os.urandom(4))
@@ -175,7 +186,7 @@ def main(args, shard_config):
     torch.cuda.set_device(args.local_rank)
 
     cfg = LatentLanguageConfig()
-    cfg.n_vocab = shard_config["n_vocab"]
+    cfg.n_vocab = round_up_to_next_multiple_of_128(shard_config["n_vocab"])
     cfg.block_size = args.context
     model = LatentLanguage(cfg)
 
