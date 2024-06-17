@@ -2,10 +2,6 @@
 
 The scripts convert downloaded HuggingFace datasets into our format by tokenizing the text and storing it in a custom format.
 
-Benchmark results:
-
-The Fineweb-Edu 1.5T dataset sharded across 4 machines takes 570GB disk space per node.  Downloading from huggingface and sharding to disk across the whole cluster takes about 6 hours (gigabit Internet) by running one (generated) bash script on the master node.  Takes 2 hours if the files are on local NAS.
-
 
 ## [Optional] Install the C++ dataloader package
 
@@ -40,7 +36,7 @@ sudo apt install pdsh parallel
 
 If you hit CTRL+C it will abort the remote jobs.
 
-This takes about ~6 hours for 4 machines on gigabit Internet using Fineweb-Edu 1.5T.
+This takes about ~10 hours for 4 machines on gigabit Internet using Fineweb-Edu 1.5T, and consumes 570GB disk space per node.
 
 After this finishes, you'll have a directory called `~/dataset_shard` with the sharded dataset on each node.
 
