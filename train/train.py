@@ -162,7 +162,10 @@ def train_one_step(args, optimizer, model, dataloader):
 
     return loss.item(), tokens_trained, correct_tokens_count
 
-# learning rate decay scheduler (linear warmup and warmdown)
+# learning rate decay scheduler (linear warmup, constant LR, and 1-sqrt cooldown)
+# Following results from "Scaling Laws and Compute-Optimal Training Beyond Fixed Training Durations" https://arxiv.org/abs/2405.18392v1
+# Take-away: You can keep the learning rate constant and decrease it to distill a model at any point.
+# They recommend cooldown that is 20% of the training steps.
 def get_lr(args, step):
     assert step <= args.steps
     # 1) linear warmup for warmup_iters steps
@@ -340,7 +343,7 @@ if __name__ == "__main__":
     parser.add_argument("--context", type=int, default=4096, help="Context size for each microbatch")
     parser.add_argument("--min-data-length", type=int, default=64, help="Minimum data length to use for training")
     parser.add_argument("--microbatch", type=int, default=8, help="Microbatch size")
-    parser.add_argument("--grad-accum", type=int, default=2, help="Gradient accumulation steps")
+    parser.add_argument("--grad-accum", type=int, default=256, help="Gradient accumulation steps")
 
     # Weights & Biases
     parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases")
@@ -352,8 +355,8 @@ if __name__ == "__main__":
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
     parser.add_argument("--steps", type=int, default=1000000, help="Total steps for training")
-    parser.add_argument("--warmup", type=int, default=1000, help="Warmup steps")
-    parser.add_argument("--cooldown", type=int, default=100000, help="Cooldown steps")
+    parser.add_argument("--warmup", type=int, default=1000, help="Warmup steps (recommended 2000 above 100k steps)")
+    parser.add_argument("--cooldown", type=int, default=200000, help="Cooldown steps (recommended 0.2x total steps)")
     parser.add_argument("--grad-clip", type=float, default=1.0, help="Maximum gradient magnitude")
 
     # Checkpointing

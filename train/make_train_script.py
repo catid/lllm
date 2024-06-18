@@ -63,9 +63,9 @@ def main():
     parser.add_argument('--script-args', type=str, default="", help="Arguments to pass to the training script.")
     parser.add_argument('--master-port', type=int, default=12355, help="Port number for master node.")
     parser.add_argument('--username', type=str, default=None, help="SSH username.")
-    
+
     args = parser.parse_args()
-    
+
     # Read hosts from the file
     hosts = read_hosts(args.hosts_file)
     
