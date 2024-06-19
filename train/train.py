@@ -129,6 +129,7 @@ def train_one_step(args, optimizer, model, dataloader):
     model.train()
     loss_accum = torch.tensor(0.0, device=device)
 
+    # FIXME: Run parallel sums to reduce memory usage for grad_accum
     for grad_accum_step in range(args.grad_accum):
         batch, is_cont, step, total_steps = dataloader.get_micro_batch()
 
