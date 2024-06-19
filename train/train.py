@@ -4,29 +4,21 @@
 # * 1.5M tokens/second training is the benchmark to beat
 # * Use [Eluether harness to eval model](https://github.com/EleutherAI/lm-evaluation-harness)
 
-import os
-
-from model.model import LatentLanguage, LatentLanguageConfig
+import os, random, time, shutil, argparse, yaml, math, copy
 
 import torch
-
-import numpy as np
-import random, time
-import shutil
-import argparse
-import yaml
-import math
-import copy
-
-import wandb
-
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType, FullStateDictConfig, OptimStateDictConfig
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.api import init_process_group, destroy_process_group
-
 import torch.distributed as dist
+
+from model.model import LatentLanguage, LatentLanguageConfig
+
+import numpy as np
+
+import wandb
 
 from cpp_dataloader import DataLoader, DataVerifier, EpochConfig
 
@@ -85,7 +77,7 @@ def recreate_folder(folder_path):
 def save_checkpoint(args, model, optimizer, checkpoint_info):
     os.makedirs(args.output_dir, exist_ok=True)
 
-    filename = f"checkpoint_epoch_{checkpoint_info["epoch"]}_step_{checkpoint_info["resume_step"]}.pth"
+    filename = f"checkpoint_epoch_{checkpoint_info['epoch']}_step_{checkpoint_info['resume_step']}.pth"
     checkpoint_path = os.path.join(args.output_dir, filename)
     checkpoint = {
         'model_state_dict': model.state_dict(),
@@ -105,8 +97,8 @@ def save_checkpoint(args, model, optimizer, checkpoint_info):
 def load_checkpoint(args, model, optimizer):
     try:
         yml_path = os.path.join(args.output_dir, "latest.yml")
-        with open(args_path, 'r') as file:
-            checkpoint_info = yaml.safe_load(yml_path)
+        with open(yml_path, 'r') as file:
+            checkpoint_info = yaml.safe_load(file)
         checkpoint_path = checkpoint_info["checkpoint_path"]
 
         checkpoint = torch.load(checkpoint_path)
