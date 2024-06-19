@@ -129,6 +129,11 @@ def train_one_step(args, optimizer, model, dataloader):
             loss = loss / args.grad_accum
             loss_accum += loss.detach()
 
+            for block in model.layers:
+                if hasattr(block, 'attn'):
+                    if hasattr(block.attn, 'kv_cache'):
+                        print(f"block.attn.kv_cache.size = {block.attn.kv_cache.size()}")
+
         # TBD: Only for DDP
         model.require_backward_grad_sync = (grad_accum_step + 1 == args.grad_accum)
         loss.backward()
@@ -227,10 +232,12 @@ def main(args, shard_config):
         lr=args.lr,
         weight_decay=args.weight_decay)
 
+    # Note: torch.compile does not seem to improve performance
     if args.compile:
         model = torch.compile(model, dynamic=True, fullgraph=False)
 
-    model = FSDP(model)
+    use_orig_params = args.compile # Required for torch.compile compatibility (but uses a bit more memory)
+    model = FSDP(model, use_orig_params=use_orig_params)
 
     params = count_parameters(model)
     if is_main_process():
@@ -264,14 +271,16 @@ def main(args, shard_config):
     epoch = 0
     tokens = 0
     total_steps = 0
+    wallclock_time = 0.0
 
     if args.resume:
         checkpoint_info = load_checkpoint(args, model, optimizer)
         if checkpoint_info is not None:
-            step = checkpoint_info["step"]
-            epoch = checkpoint_info["epoch"]
-            total_steps = checkpoint_info["total_steps"]
-            tokens = checkpoint_info["tokens"]
+            step = checkpoint_info.get("step", 0)
+            epoch = checkpoint_info.get("epoch", 0)
+            total_steps = checkpoint_info.get("total_steps", 0)
+            tokens = checkpoint_info.get("tokens", 0)
+            wallclock_time = checkpoint_info.get("wallclock_time", 0.0)
             logger.info(f"Loaded checkpoint at step={step} epoch={epoch}")
         else:
             logger.info("No checkpoint found - Starting training from scratch")
@@ -316,9 +325,6 @@ def main(args, shard_config):
                 logger.info(f"Epoch {epoch} data exhausted on global_rank={args.global_rank} at step={step}")
                 break
 
-            end_time = time.time()
-            step_time = end_time - start_time
-
             # Sync variables between ranks
             avg_train_loss = torch.tensor(train_loss, device=device)
             sum_tokens = torch.tensor(train_tokens, device=device)
@@ -330,6 +336,9 @@ def main(args, shard_config):
             sum_tokens = sum_tokens.item()
             sum_correct = sum_correct.item()
 
+            end_time = time.time()
+            step_time = end_time - start_time
+
             tokens += sum_tokens
             tokens_per_second = sum_tokens / step_time
             correct_pct = sum_correct * 100.0 / sum_tokens
@@ -339,18 +348,18 @@ def main(args, shard_config):
 
             step += 1
             total_steps += 1
+            wallclock_time += step_time
 
             if step % args.checkpoint_interval == 0:
-                # FIXME: step can be >= epoch steps during checkpointing
                 checkpoint_info = {
                     'train_version': 1,
                     'avg_train_loss': avg_train_loss,
-                    'args': args,
+                    'args': vars(args),
                     'total_steps': total_steps,
                     'epoch': epoch,
                     'step': step,
                     'tokens': tokens,
-                    'wallclock_time': step_time,
+                    'wallclock_time': wallclock_time,
                     'lr': optimizer.param_groups[0]['lr'],
                 }
 
@@ -399,12 +408,12 @@ if __name__ == "__main__":
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
     parser.add_argument("--steps", type=int, default=1000000, help="Total steps for training")
-    parser.add_argument("--warmup", type=int, default=1000, help="Warmup steps (recommended 2000 above 100k steps)")
+    parser.add_argument("--warmup", type=int, default=10, help="Warmup steps (recommended 2000 above 100k steps)")
     parser.add_argument("--cooldown", type=int, default=200000, help="Cooldown steps (recommended 0.2x total steps)")
     parser.add_argument("--grad-clip", type=float, default=1.0, help="Maximum gradient magnitude")
 
     # Checkpointing
-    parser.add_argument("--checkpoint-interval", type=int, default=1, help="Steps between checkpoints")
+    parser.add_argument("--checkpoint-interval", type=int, default=100, help="Steps between checkpoints")
 
     # Torchrun
     parser.add_argument("--master-addr", type=str, default="localhost", help="Address of master node")
@@ -418,8 +427,9 @@ if __name__ == "__main__":
     args.world_size = int(os.getenv("WORLD_SIZE", "1"))
     args.local_world_size = int(os.getenv("LOCAL_WORLD_SIZE", "1"))
 
-    args.dataset_dir = os.path.expanduser(args.dataset_dir)
-    args.holdout_dir = os.path.expanduser(args.holdout_dir)
+    args.dataset_dir = os.path.abspath(os.path.expanduser(args.dataset_dir))
+    args.holdout_dir = os.path.abspath(os.path.expanduser(args.holdout_dir))
+    args.output_dir = os.path.abspath(os.path.expanduser(args.output_dir))
 
     if not os.path.exists(args.dataset_dir):
         raise RuntimeError(f"Dataset directory {args.dataset_dir} does not exist")
