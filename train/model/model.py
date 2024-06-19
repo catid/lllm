@@ -10,7 +10,7 @@ from dataclasses import dataclass
 #Model TODO:
 #* Mamba2 interleaved with SWA layers
 #* SWA + Primer Spatial D-Conv 3x1: https://arxiv.org/pdf/2109.08668v2 (Figure 4)
-#* Produce 4 tokens at once using 4x MLP heads
+#* Produce 2 tokens at once using 2x MLP heads
 #* RWKV_CMix_x060
 #* SRMSNorm
 

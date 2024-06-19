@@ -164,17 +164,17 @@ def train_one_step(args, optimizer, model, dataloader):
 
 # learning rate decay scheduler (linear warmup, constant LR, and 1-sqrt cooldown)
 # Following results from "Scaling Laws and Compute-Optimal Training Beyond Fixed Training Durations" https://arxiv.org/abs/2405.18392v1
-# Take-away: You can keep the learning rate constant and decrease it to distill a model at any point.
-# They recommend cooldown that is 20% of the training steps.
+# Take-away: You can keep the learning rate constant until you decide to end training at any point after a short cooldown period.
+# They recommend a cooldown period that is 20% of the training steps.
 def get_lr(args, step):
     assert step <= args.steps
-    # 1) linear warmup for warmup_iters steps
+    # 1) linear warmup for args.warmup steps
     if step < args.warmup:
         return args.lr * (step+1) / args.warmup
     # 2) constant lr for a while
     elif step < args.steps - args.cooldown:
         return args.lr
-    # 3) 1-sqrt cooldown
+    # 3) 1-sqrt cooldown for args.cooldown steps
     else:
         decay_ratio = (step - (args.steps - args.cooldown)) / args.cooldown
         return args.lr * (1 - math.sqrt(decay_ratio))

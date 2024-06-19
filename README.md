@@ -30,6 +30,7 @@ Dataloader future improvements:
 * RHO-loss for the dataset using LLaMA-3 8B to provide reference loss for each token - need to convert to our tokenizer via approximation
 
 Training future experiments:
+* Meta-learning to try to estimate weight updates using larger batch sizes and more iterations from smaller batch sizes and single steps
 * Try optimi https://optimi.benjaminwarner.dev/
 * AdaLOMO
 
