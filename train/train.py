@@ -8,10 +8,6 @@ import os, random, time, shutil, argparse, yaml, math, copy
 
 import torch
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.wrap import enable_wrap, wrap
-from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType, FullStateDictConfig, OptimStateDictConfig
-from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.api import init_process_group, destroy_process_group
 import torch.distributed as dist
 
 from model.model import LatentLanguage, LatentLanguageConfig
@@ -176,6 +172,9 @@ def main(args, shard_config):
         logger.info(f"Arguments: {args}")
 
     logger.info(f"Node local_rank={args.local_rank} global_rank={args.global_rank} local_world_size={args.local_world_size} world_size={args.world_size}")
+
+    os.environ['MASTER_ADDR'] = args.master_addr
+    os.environ['MASTER_PORT'] = str(args.master_port)
 
     dist.init_process_group(backend='nccl', rank=args.global_rank, world_size=args.world_size)
     torch.cuda.set_device(args.local_rank)
@@ -354,6 +353,10 @@ if __name__ == "__main__":
     # Checkpointing
     parser.add_argument("--checkpoint-interval", type=int, default=1000, help="Steps between checkpoints")
 
+    # Torchrun
+    parser.add_argument("--master-addr", type=str, default="localhost", help="Address of master node")
+    parser.add_argument("--master-port", type=int, default=12345, help="Port of master node")
+
     args = parser.parse_args()
 
     # Get environment variables from torchrun
@@ -363,6 +366,7 @@ if __name__ == "__main__":
     args.local_world_size = int(os.getenv("LOCAL_WORLD_SIZE", "1"))
 
     args.dataset_dir = os.path.expanduser(args.dataset_dir)
+    args.holdout_dir = os.path.expanduser(args.holdout_dir)
 
     if not os.path.exists(args.dataset_dir):
         raise RuntimeError(f"Dataset directory {args.dataset_dir} does not exist")
@@ -383,5 +387,4 @@ if __name__ == "__main__":
 
     main(args, shard_config)
 
-    destroy_process_group()
-
+    dist.destroy_process_group()
