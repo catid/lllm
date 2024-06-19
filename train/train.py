@@ -49,10 +49,12 @@ def synchronize_seed(args):
     if args.seed < 0:
         args.seed = get_true_random_32bit_positive_integer()
 
+    device = torch.device("cuda")
+
     if args.global_rank == 0:
-        seed_tensor = torch.tensor(args.seed, dtype=torch.long)  # A tensor with the value to be sent
+        seed_tensor = torch.tensor(args.seed, dtype=torch.long, device=device)  # A tensor with the value to be sent
     else:
-        seed_tensor = torch.zeros(1, dtype=torch.long)  # A tensor to receive the value
+        seed_tensor = torch.zeros(1, dtype=torch.long, device=device)  # A tensor to receive the value
 
     dist.broadcast(tensor=seed_tensor, src=0)
 
@@ -107,6 +109,8 @@ def load_checkpoint(args, model, optimizer):
     return checkpoint_info
 
 def train_one_step(args, optimizer, model, dataloader):
+    device = torch.device("cuda")
+
     model.train()
     loss_accum = 0.0
 
@@ -116,7 +120,7 @@ def train_one_step(args, optimizer, model, dataloader):
         if batch is None:
             return None, None
 
-        input_ids = torch.from_numpy(batch).to(torch.long).to(model.device)
+        input_ids = torch.from_numpy(batch).to(torch.long).to(device)
         labels = input_ids[..., :-1].contiguous()
         targets = input_ids[..., 1:].contiguous()
 
@@ -168,9 +172,6 @@ def get_lr(args, step):
         return args.lr * (1 - math.sqrt(decay_ratio))
 
 def main(args, shard_config):
-    if is_main_process():
-        logger.info(f"Arguments: {args}")
-
     logger.info(f"Node local_rank={args.local_rank} global_rank={args.global_rank} local_world_size={args.local_world_size} world_size={args.world_size}")
 
     os.environ['MASTER_ADDR'] = args.master_addr
@@ -178,11 +179,15 @@ def main(args, shard_config):
 
     dist.init_process_group(backend='nccl', rank=args.global_rank, world_size=args.world_size)
     torch.cuda.set_device(args.local_rank)
+    device = torch.device("cuda")
+
+    if is_main_process():
+        logger.info(f"Arguments: {args}")
 
     cfg = LatentLanguageConfig()
     cfg.n_vocab = round_up_to_next_multiple_of_128(shard_config["n_vocab"])
     cfg.block_size = args.context
-    model = LatentLanguage(cfg)
+    model = LatentLanguage(cfg).to(device)
 
     optimizer = schedulefree.AdamWScheduleFree(
         model.parameters(),
