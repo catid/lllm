@@ -75,7 +75,7 @@ def recreate_folder(folder_path):
 def save_checkpoint(args, model, optimizer, checkpoint_info):
     os.makedirs(args.output_dir, exist_ok=True)
 
-    filename = f"checkpoint_epoch_{checkpoint_info['epoch']}_step_{checkpoint_info['resume_step']}.pth"
+    filename = f"checkpoint_epoch_{checkpoint_info['epoch']}_step_{checkpoint_info['step']}.pth"
     checkpoint_path = os.path.join(args.output_dir, filename)
     checkpoint = {
         'model_state_dict': model.state_dict(),
@@ -112,7 +112,7 @@ def train_one_step(args, optimizer, model, dataloader):
     device = torch.device("cuda")
 
     model.train()
-    loss_accum = 0.0
+    loss_accum = torch.tensor(0.0, device=device)
 
     for grad_accum_step in range(args.grad_accum):
         batch, is_cont, step, total_steps = dataloader.get_micro_batch()
@@ -152,7 +152,7 @@ def train_one_step(args, optimizer, model, dataloader):
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
 
-    return loss.item(), tokens_trained, correct_tokens_count
+    return loss_accum.item(), tokens_trained, correct_tokens_count
 
 # learning rate decay scheduler (linear warmup, constant LR, and 1-sqrt cooldown)
 # Following results from "Scaling Laws and Compute-Optimal Training Beyond Fixed Training Durations" https://arxiv.org/abs/2405.18392v1
@@ -171,6 +171,38 @@ def get_lr(args, step):
         decay_ratio = (step - (args.steps - args.cooldown)) / args.cooldown
         return args.lr * (1 - math.sqrt(decay_ratio))
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def print_training_state_info(model, optimizer):
+    print("Model state information:")
+    total_model_size = 0
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print(f"  Layer: {name}")
+            print(f"    Size: {param.size()}")
+            print(f"    Data type: {param.dtype}")
+            total_model_size += param.numel() * param.element_size()
+    print(f"Total model size: {total_model_size} bytes")
+
+    print("\nOptimizer state information:")
+    total_optimizer_size = 0
+    for group in optimizer.param_groups:
+        print(f"  Parameter group:")
+        for param_id, param in enumerate(group['params']):
+            print(f"    Parameter {param_id}:")
+            print(f"      Size: {param.size()}")
+            print(f"      Data type: {param.dtype}")
+            total_optimizer_size += param.numel() * param.element_size()
+            state = optimizer.state[param]
+            for key, value in state.items():
+                if torch.is_tensor(value):
+                    print(f"      State '{key}':")
+                    print(f"        Size: {value.size()}")
+                    print(f"        Data type: {value.dtype}")
+                    total_optimizer_size += value.numel() * value.element_size()
+    print(f"Total optimizer state size: {total_optimizer_size} bytes")
+
 def main(args, shard_config):
     logger.info(f"Node local_rank={args.local_rank} global_rank={args.global_rank} local_world_size={args.local_world_size} world_size={args.world_size}")
 
@@ -186,8 +218,9 @@ def main(args, shard_config):
 
     cfg = LatentLanguageConfig()
     cfg.n_vocab = round_up_to_next_multiple_of_128(shard_config["n_vocab"])
+
     cfg.block_size = args.context
-    model = LatentLanguage(cfg).to(device)
+    model = LatentLanguage(cfg).to(device).to(torch.bfloat16)
 
     optimizer = schedulefree.AdamWScheduleFree(
         model.parameters(),
@@ -198,6 +231,10 @@ def main(args, shard_config):
         model = torch.compile(model, dynamic=True, fullgraph=False)
 
     model = FSDP(model)
+
+    params = count_parameters(model)
+    if is_main_process():
+        logger.info(f"Total model parameters: {params/1000000.0:.2f}M")
 
     if args.verify_dataset:
         logger.info("Verifying dataset... (should take about one minute per 0.4T tokens using an SSD)")
@@ -226,12 +263,14 @@ def main(args, shard_config):
     step = 0
     epoch = 0
     tokens = 0
+    total_steps = 0
 
     if args.resume:
         checkpoint_info = load_checkpoint(args, model, optimizer)
         if checkpoint_info is not None:
-            step = checkpoint_info["resume_step"]
+            step = checkpoint_info["step"]
             epoch = checkpoint_info["epoch"]
+            total_steps = checkpoint_info["total_steps"]
             tokens = checkpoint_info["tokens"]
             logger.info(f"Loaded checkpoint at step={step} epoch={epoch}")
         else:
@@ -250,7 +289,7 @@ def main(args, shard_config):
     if not validation_dataloader:
         raise RuntimeError("Validation dataloader failed to initialize")
 
-    while True:
+    while total_steps < args.steps:
         config = EpochConfig()
         config.seed0 = args.seed
         config.seed1 = epoch
@@ -281,9 +320,9 @@ def main(args, shard_config):
             step_time = end_time - start_time
 
             # Sync variables between ranks
-            avg_train_loss = torch.tensor(train_loss)
-            sum_tokens = torch.tensor(train_tokens)
-            sum_correct = torch.tensor(correct_tokens_count)
+            avg_train_loss = torch.tensor(train_loss, device=device)
+            sum_tokens = torch.tensor(train_tokens, device=device)
+            sum_correct = torch.tensor(correct_tokens_count, device=device)
             dist.all_reduce(tensor=avg_train_loss, op=dist.ReduceOp.AVG)
             dist.all_reduce(tensor=sum_tokens, op=dist.ReduceOp.SUM)
             dist.all_reduce(tensor=sum_correct, op=dist.ReduceOp.SUM)
@@ -299,12 +338,15 @@ def main(args, shard_config):
                 logger.info(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec correct={correct_pct:.2f}% Tokens={tokens/1000000.0:.2f}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
 
             step += 1
+            total_steps += 1
 
             if step % args.checkpoint_interval == 0:
+                # FIXME: step can be >= epoch steps during checkpointing
                 checkpoint_info = {
                     'train_version': 1,
                     'avg_train_loss': avg_train_loss,
                     'args': args,
+                    'total_steps': total_steps,
                     'epoch': epoch,
                     'step': step,
                     'tokens': tokens,
@@ -317,11 +359,17 @@ def main(args, shard_config):
 
                 save_checkpoint(args, model, optimizer, checkpoint_info)
 
-        logger.info(f"Epoch {epoch} complete on rank {args.global_rank}")
+                #torch.cuda.empty_cache()
 
+            #print_training_state_info(model, optimizer)
+
+        # End of epoch
+        logger.info(f"Epoch {epoch} complete on rank {args.global_rank}")
+        epoch += 1
+        step = 0
         dist.barrier()
 
-        epoch += 1
+    logger.info(f"Training complete.  Total steps: {total_steps}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training")
@@ -338,8 +386,8 @@ if __name__ == "__main__":
     parser.add_argument("--verify-dataset", action="store_true", help="Verify the dataset before training")
     parser.add_argument("--context", type=int, default=4096, help="Context size for each microbatch")
     parser.add_argument("--min-data-length", type=int, default=64, help="Minimum data length to use for training")
-    parser.add_argument("--microbatch", type=int, default=8, help="Microbatch size")
-    parser.add_argument("--grad-accum", type=int, default=256, help="Gradient accumulation steps")
+    parser.add_argument("--microbatch", type=int, default=1, help="Microbatch size")
+    parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
 
     # Weights & Biases
     parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases")
@@ -356,7 +404,7 @@ if __name__ == "__main__":
     parser.add_argument("--grad-clip", type=float, default=1.0, help="Maximum gradient magnitude")
 
     # Checkpointing
-    parser.add_argument("--checkpoint-interval", type=int, default=1000, help="Steps between checkpoints")
+    parser.add_argument("--checkpoint-interval", type=int, default=1, help="Steps between checkpoints")
 
     # Torchrun
     parser.add_argument("--master-addr", type=str, default="localhost", help="Address of master node")

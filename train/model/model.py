@@ -2,6 +2,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from torch.utils.checkpoint import checkpoint
+
 import math
 
 from dataclasses import dataclass
@@ -130,9 +132,13 @@ class LatentLanguageConfig:
     layers: int = 12
     block_size: int = 256
 
+    enable_checkpointing: bool = False
+
 class LatentLanguage(nn.Module):
     def __init__(self, cfg):
         super().__init__()
+
+        self.cfg = cfg
 
         self.embedding = nn.Embedding(cfg.n_vocab, cfg.n_embd)
         self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
@@ -157,17 +163,25 @@ class LatentLanguage(nn.Module):
 
         x = x.masked_fill(x == -1, 0) # replace padding with some other value
 
-        x = self.embedding(x)
+        def custom_forward(x):
+            x = self.embedding(x)
 
-        pos = torch.arange(0, N, dtype=torch.long, device=x.device)
-        pos_emb = self.pos_emb(pos)
+            pos = torch.arange(0, N, dtype=torch.long, device=x.device)
+            pos_emb = self.pos_emb(pos)
 
-        x = self.drop(x + pos_emb)
+            x = self.drop(x + pos_emb)
 
-        for block in self.layers:
-            x = block(x, mask=attn_mask)
+            for block in self.layers:
+                x = block(x, mask=attn_mask)
 
-        logits = self.lm_head(x)
+            logits = self.lm_head(x)
+
+            return logits
+
+        if self.cfg.enable_checkpointing:
+            logits = checkpoint(custom_forward, x, use_reentrant=False, preserve_rng_state=True)
+        else:
+            logits = custom_forward(x)
 
         loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
