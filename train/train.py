@@ -215,7 +215,7 @@ def main(args, shard_config):
     # Weights & Biases
     if args.wandb and is_main_process():
         if not args.name:
-            raise "The --name argument is required when using --wandb"
+            raise RuntimeError("The --name argument is required when using --wandb")
         wandb.init(project=args.project, name=args.name, config=args)
         wandb.run.log_code = False
 
