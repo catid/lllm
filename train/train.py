@@ -5,12 +5,27 @@
 # * Use [Eluether harness to eval model](https://github.com/EleutherAI/lm-evaluation-harness)
 
 import os, random, time, shutil, argparse, yaml, math, copy
+from packaging import version
 
 import torch
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel,
+    MixedPrecision,
+    BackwardPrefetch,
+    ShardingStrategy,
+    FullStateDictConfig,
+    StateDictType,
+)
+from torch.distributed.fsdp.wrap import (
+    transformer_auto_wrap_policy,
+    enable_wrap,
+    wrap,
+)
 import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel
+from functools import partial
 
-from model.model import LatentLanguage, LatentLanguageConfig
+from model.model import LatentLanguage, LatentLanguageConfig, CausalSelfAttention
 
 import numpy as np
 
@@ -129,11 +144,6 @@ def train_one_step(args, optimizer, model, dataloader):
             loss = loss / args.grad_accum
             loss_accum += loss.detach()
 
-            for block in model.layers:
-                if hasattr(block, 'attn'):
-                    if hasattr(block.attn, 'kv_cache'):
-                        print(f"block.attn.kv_cache.size = {block.attn.kv_cache.size()}")
-
         # TBD: Only for DDP
         model.require_backward_grad_sync = (grad_accum_step + 1 == args.grad_accum)
         loss.backward()
@@ -208,6 +218,68 @@ def print_training_state_info(model, optimizer):
                     total_optimizer_size += value.numel() * value.element_size()
     print(f"Total optimizer state size: {total_optimizer_size} bytes")
 
+def setup_fsdp(args, model):
+    # Note: torch.compile does not seem to improve performance
+    if args.compile:
+        model = torch.compile(model, dynamic=True, fullgraph=False)
+
+    if args.shard_strategy == "NO_SHARD":
+        model = DistributedDataParallel(model, device_ids=[args.local_rank])
+        return model
+
+    bf16_ready = (
+        torch.version.cuda
+        and torch.cuda.is_bf16_supported()
+        and version.parse(torch.version.cuda) >= version.parse("11.0")
+        and dist.is_nccl_available()
+        and torch.cuda.nccl.version() >= (2, 10)
+    )
+
+    if bf16_ready:
+        mp_policy = MixedPrecision(
+            param_dtype=torch.bfloat16,
+            reduce_dtype=torch.bfloat16,
+            buffer_dtype=torch.bfloat16,
+        )
+    else:
+        logger.warn("BF16 not available")
+        mp_policy = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+        )
+
+    t5_auto_wrap_policy = partial(
+            transformer_auto_wrap_policy,
+            transformer_layer_cls={
+                CausalSelfAttention,
+            },
+        )
+
+    # Select the sharding strategy based on the argument
+    if args.shard_strategy == "FULL_SHARD":
+        shard_strategy = ShardingStrategy.FULL_SHARD
+    elif args.shard_strategy == "SHARD_GRAD_OP":
+        shard_strategy = ShardingStrategy.SHARD_GRAD_OP
+    elif args.shard_strategy == "HYBRID_SHARD":
+        shard_strategy = ShardingStrategy.HYBRID_SHARD
+    else:
+        raise ValueError(f"Unknown sharding strategy: {args.shard_strategy}")
+
+    # Required for torch.compile compatibility (but uses a bit more memory)
+    use_orig_params = args.compile
+
+    model = FullyShardedDataParallel(
+        model,
+        auto_wrap_policy=t5_auto_wrap_policy,
+        mixed_precision=mp_policy,
+        use_orig_params=use_orig_params,
+        sharding_strategy=shard_strategy)
+
+    model = DistributedDataParallel(model)
+
+    return model
+
 def main(args, shard_config):
     logger.info(f"Node local_rank={args.local_rank} global_rank={args.global_rank} local_world_size={args.local_world_size} world_size={args.world_size}")
 
@@ -227,17 +299,12 @@ def main(args, shard_config):
     cfg.block_size = args.context
     model = LatentLanguage(cfg).to(device).to(torch.bfloat16)
 
+    model = setup_fsdp(args, model)
+
     optimizer = schedulefree.AdamWScheduleFree(
         model.parameters(),
         lr=args.lr,
         weight_decay=args.weight_decay)
-
-    # Note: torch.compile does not seem to improve performance
-    if args.compile:
-        model = torch.compile(model, dynamic=True, fullgraph=False)
-
-    use_orig_params = args.compile # Required for torch.compile compatibility (but uses a bit more memory)
-    model = FSDP(model, use_orig_params=use_orig_params)
 
     params = count_parameters(model)
     if is_main_process():
@@ -393,10 +460,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset-dir", type=str, default="~/dataset_shard", help="Dataset directory")
     parser.add_argument("--holdout-dir", type=str, default="~/holdout_shard", help="Holdout directory")
     parser.add_argument("--verify-dataset", action="store_true", help="Verify the dataset before training")
-    parser.add_argument("--context", type=int, default=4096, help="Context size for each microbatch")
     parser.add_argument("--min-data-length", type=int, default=64, help="Minimum data length to use for training")
-    parser.add_argument("--microbatch", type=int, default=1, help="Microbatch size")
-    parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
 
     # Weights & Biases
     parser.add_argument("--wandb", action="store_true", help="Enable Weights & Biases")
@@ -404,6 +468,9 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str, default="my_project", help="Collection of experiments on wandb")
 
     # Hyperparameters
+    parser.add_argument("--context", type=int, default=4096, help="Context size for each microbatch")
+    parser.add_argument("--microbatch", type=int, default=1, help="Microbatch size")
+    parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
@@ -415,9 +482,10 @@ if __name__ == "__main__":
     # Checkpointing
     parser.add_argument("--checkpoint-interval", type=int, default=100, help="Steps between checkpoints")
 
-    # Torchrun
+    # Distributed training
     parser.add_argument("--master-addr", type=str, default="localhost", help="Address of master node")
     parser.add_argument("--master-port", type=int, default=12345, help="Port of master node")
+    parser.add_argument("--shard-strategy", type=str, default="NO_SHARD", choices=["FULL_SHARD", "SHARD_GRAD_OP", "NO_SHARD", "HYBRID_SHARD"], help="Sharding strategy for FSDP")
 
     args = parser.parse_args()
 
