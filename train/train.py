@@ -495,8 +495,6 @@ if __name__ == "__main__":
     args.holdout_dir = os.path.abspath(os.path.expanduser(args.holdout_dir))
     args.output_dir = os.path.abspath(os.path.expanduser(args.output_dir))
 
-    logger.info(f"args = {args}")
-
     if not os.path.exists(args.dataset_dir):
         raise RuntimeError(f"Dataset directory {args.dataset_dir} does not exist")
     if not os.path.exists(args.holdout_dir):

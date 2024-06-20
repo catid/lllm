@@ -24,6 +24,7 @@ def generate_master_script(hosts, world_size, args, unknown_args):
     script_content += "\n# Set trap to call the kill_remote_jobs function when SIGINT (CTRL+C) is received\n"
     script_content += "kill_remote_jobs() {\n"
     script_content += f"    pdsh -R ssh -w {','.join([f'{host}' for host, _ in hosts])} 'pkill -f train.py'\n"
+    script_content +=  "    echo \"Caught CTRL+C and issued pkill to remote nodes\"\n"
     script_content += "}\n"
     script_content += "trap 'kill_remote_jobs' SIGINT\n\n"
 
