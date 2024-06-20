@@ -2,11 +2,10 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from torch.utils.checkpoint import checkpoint
-
-import math
-
 from .srmsnorm import FastSimpleRMSNorm
+
+from mamba_ssm import Mamba2
+import math
 
 from dataclasses import dataclass
 
@@ -19,10 +18,13 @@ class LatentLanguageConfig:
     dropout: float = 0.2
     n_head: int = 12
     n_layer: int = 12
-    block_size: int = 256
+
     ffn_mult: int = 4
 
-    enable_checkpointing: bool = False
+    d_state: int = 128
+    d_conv: int = 4
+    expand: int = 2
+    headdim: int = 64
 
 #
 #Model TODO:
@@ -61,8 +63,55 @@ class RWKV_CMix_x060(nn.Module):
         # TBD: Gate next layer per head via mask
         return torch.sigmoid(self.receptance(xr)) * kv
 
-class CausalSelfAttention(nn.Module):
+# https://github.com/huggingface/transformers/blob/c28d04e9e252a1a099944e325685f14d242ecdcd/src/transformers/models/gpt2/modeling_gpt2.py#L454
+def _init_weights(
+    module,
+    n_layer,
+    initializer_range=0.02,  # Now only used for embedding layer.
+    rescale_prenorm_residual=True,
+    n_residuals_per_layer=1,  # Change to 2 if we have MLP
+):
+    if isinstance(module, nn.Linear):
+        if module.bias is not None:
+            if not getattr(module.bias, "_no_reinit", False):
+                nn.init.zeros_(module.bias)
+    elif isinstance(module, nn.Embedding):
+        nn.init.normal_(module.weight, std=initializer_range)
 
+    if rescale_prenorm_residual:
+        # Reinitialize selected weights subject to the OpenAI GPT-2 Paper Scheme:
+        #   > A modified initialization which accounts for the accumulation on the residual path with model depth. Scale
+        #   > the weights of residual layers at initialization by a factor of 1/√N where N is the # of residual layers.
+        #   >   -- GPT-2 :: https://openai.com/blog/better-language-models/
+        #
+        # Reference (Megatron-LM): https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/model/gpt_model.py
+        for name, p in module.named_parameters():
+            if name in ["out_proj.weight", "fc2.weight"]:
+                # Special Scaled Initialization --> There are 2 Layer Norms per Transformer Block
+                # Following Pytorch init, except scale by 1/sqrt(2 * n_layer)
+                # We need to reinit p since this code could be called multiple times
+                # Having just p *= scale would repeatedly scale it down
+                nn.init.kaiming_uniform_(p, a=math.sqrt(5))
+                with torch.no_grad():
+                    p /= math.sqrt(n_residuals_per_layer * n_layer)
+
+class Mamba2Block(nn.Module):
+    def __init__(self, args, layer_id):
+        super().__init__()
+
+        self.mixer = Mamba2(
+                    d_model=args.n_embd,
+                    d_state=args.d_state,
+                    d_conv=args.d_conv,
+                    expand=args.expand,
+                    headdim=args.headdim)
+
+        _init_weights(self.mixer, layer_id)
+
+    def forward(self, x):
+        return self.mixer(x)
+
+class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
@@ -98,11 +147,11 @@ class Block(nn.Module):
     def __init__(self, args, layer_id):
         super().__init__()
         self.ln = FastSimpleRMSNorm(args.n_embd)
-        self.attn = CausalSelfAttention(args)
+        self.attn = Mamba2Block(args, layer_id)
         self.mlp = RWKV_CMix_x060(args, layer_id)
 
-    def forward(self, x, mask):
-        x = x + self.attn(self.ln(x), mask=mask)
+    def forward(self, x):
+        x = x + self.attn(self.ln(x))
         x = x + self.mlp(self.ln(x))
         return x
 
@@ -113,7 +162,6 @@ class LatentLanguage(nn.Module):
         self.cfg = cfg
 
         self.embedding = nn.Embedding(cfg.n_vocab, cfg.n_embd)
-        self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
 
         self.layers = nn.ModuleList()
 
@@ -131,29 +179,18 @@ class LatentLanguage(nn.Module):
         B, N = x.size()
 
         # True: should take part in attention
-        attn_mask = (x != -1).unsqueeze(1).unsqueeze(2)
+        #attn_mask = (x != -1).unsqueeze(1).unsqueeze(2)
 
         x = x.masked_fill(x == -1, 0) # replace padding with some other value
 
-        def custom_forward(x):
-            x = self.embedding(x)
+        x = self.embedding(x)
 
-            pos = torch.arange(0, N, dtype=torch.long, device=x.device)
-            pos_emb = self.pos_emb(pos)
+        x = self.drop(x)
 
-            x = self.drop(x + pos_emb)
+        for block in self.layers:
+            x = block(x)
 
-            for block in self.layers:
-                x = block(x, mask=attn_mask)
-
-            logits = self.lm_head(x)
-
-            return logits
-
-        if self.cfg.enable_checkpointing:
-            logits = checkpoint(custom_forward, x, use_reentrant=False, preserve_rng_state=True)
-        else:
-            logits = custom_forward(x)
+        logits = self.lm_head(x)
 
         loss = F.cross_entropy(
             logits.view(-1, logits.size(-1)),
