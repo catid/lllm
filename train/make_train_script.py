@@ -24,7 +24,8 @@ def generate_master_script(hosts, world_size, args, unknown_args):
     script_content += "\n# Set trap to call the kill_remote_jobs function when SIGINT (CTRL+C) is received\n"
     script_content += "kill_remote_jobs() {\n"
     script_content += f"    pdsh -R ssh -w {','.join([f'{host}' for host, _ in hosts])} 'pkill -f train.py'\n"
-    script_content +=  "    echo \"Caught CTRL+C and issued pkill to remote nodes\"\n"
+    script_content +=  "    echo\n"
+    script_content +=  "    echo Caught CTRL+C and issued pkill to remote nodes\n"
     script_content += "}\n"
     script_content += "trap 'kill_remote_jobs' SIGINT\n\n"
 
@@ -33,10 +34,11 @@ def generate_master_script(hosts, world_size, args, unknown_args):
     for hostname, rank_count in hosts:
         command_parts = [
             f"\"{args.conda_dir}/envs/{args.conda_env}/bin/torchrun\"",
-            f"--nproc_per_node={rank_count}",
+            f"--nproc-per-node={rank_count}",
             f"--nnodes={len(hosts)}",
-            f"--master_addr={args.master_addr}",
-            f"--master_port={args.master_port}",
+            f"--rdzv-endpoint={args.rdzv_endpoint}",
+            f"--rdzv-id={args.rdzv_id}",
+            f"--rdzv-backend=c10d",
             f"{args.source_dir}/train.py",
         ]
         command_parts = command_parts + unknown_args
@@ -70,8 +72,8 @@ def main():
     parser.add_argument('--conda-env', type=str, default="lllm", help="Conda environment name.")
     parser.add_argument('--conda-dir', type=str, default="~/mambaforge", help="Conda environment directory.")
     parser.add_argument('--username', type=str, default=None, help="SSH username.")
-    parser.add_argument("--master-addr", type=str, default=None, help="Address of master node. Default: First hosts.txt entry")
-    parser.add_argument("--master-port", type=int, default=12345, help="Port to use for the master node")
+    parser.add_argument("--rdzv-endpoint", type=str, default=None, help="Address of master node. Default: First hosts.txt entry")
+    parser.add_argument("--rdzv-id", type=int, default=12345, help="Rendezvous group identifier")
 
     # We interpret these args and pass the rest to the train.py script
     args, unknown_args = parser.parse_known_args()
@@ -88,8 +90,8 @@ def main():
 
     print(f"World size: {world_size} across {len(hosts)} hosts. Generating master shell script...")
 
-    if args.master_addr is None:
-        args.master_addr = hosts[0][0]
+    if args.rdzv_endpoint is None:
+        args.rdzv_endpoint = hosts[0][0] + ":12345"
 
     generate_master_script(hosts, world_size, args, unknown_args)
 

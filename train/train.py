@@ -37,7 +37,16 @@ import schedulefree
 
 from logger_tt import setup_logging, logger
 
-setup_logging(use_multiprocessing="fork")
+def get_current_script_directory():
+    # Get the absolute path of the current script
+    script_path = os.path.abspath(sys.argv[0])
+    # Get the directory name from the script path
+    script_dir = os.path.dirname(script_path)
+    return script_dir
+
+setup_logging(
+    use_multiprocessing="fork",
+    log_path=os.path.join(get_current_script_directory(), "train.log"))
 
 # Enable cuDNN benchmarking to improve online performance
 torch.backends.cudnn.benchmark = True
