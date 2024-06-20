@@ -4,7 +4,7 @@
 # * 1.5M tokens/second training is the benchmark to beat
 # * Use [Eluether harness to eval model](https://github.com/EleutherAI/lm-evaluation-harness)
 
-import os, random, time, shutil, argparse, yaml, math, copy
+import os, random, time, shutil, argparse, yaml, math, copy, sys
 from packaging import version
 
 import torch
