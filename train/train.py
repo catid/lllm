@@ -136,7 +136,11 @@ def train_one_step(args, optimizer, model, dataloader):
     device = torch.device("cuda")
 
     model.train()
-    loss_accum = torch.tensor(0.0, device=device)
+
+    # Training statistics
+    sum_loss = torch.tensor(0.0, device=device)
+    sum_tokens = torch.tensor(0, device=device)
+    sum_correct = torch.tensor(0, device=device)
 
     # FIXME: Run parallel sums to reduce memory usage for grad_accum
     for grad_accum_step in range(args.grad_accum):
@@ -149,24 +153,19 @@ def train_one_step(args, optimizer, model, dataloader):
         labels = input_ids[..., :-1].contiguous()
         targets = input_ids[..., 1:].contiguous()
 
+        sum_tokens += torch.sum(targets != -1)
+
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             logits, loss = model(labels, targets)
             loss = loss / args.grad_accum
-            loss_accum += loss.detach()
+            sum_loss += loss.detach()
 
-        # TBD: Only for DDP
-        model.require_backward_grad_sync = (grad_accum_step + 1 == args.grad_accum)
-        loss.backward()
-
-        tokens_trained = torch.sum(targets != -1).item()
-
-        # FIXME
         predictions = torch.argmax(logits, dim=-1)
-        correct_predictions = (predictions == targets) & (targets != -1)
-        correct_tokens_count = torch.sum(correct_predictions).item()
+        sum_correct += torch.sum((predictions == targets) & (targets != -1))
 
-    # TBD: Only for DDP
-    dist.all_reduce(loss_accum, op=dist.ReduceOp.AVG)
+        if args.shard_strategy == "NO_SHARD":
+            model.require_backward_grad_sync = (grad_accum_step + 1 == args.grad_accum)
+        loss.backward()
 
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
 
@@ -177,7 +176,12 @@ def train_one_step(args, optimizer, model, dataloader):
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
 
-    return loss_accum.item(), tokens_trained, correct_tokens_count
+    # Sync statistics between ranks
+    avg_loss = dist.all_reduce(tensor=sum_loss, op=dist.ReduceOp.AVG)
+    dist.all_reduce(tensor=sum_tokens, op=dist.ReduceOp.SUM)
+    dist.all_reduce(tensor=sum_correct, op=dist.ReduceOp.SUM)
+
+    return avg_loss.item(), sum_tokens.item(), sum_correct.item()
 
 # learning rate decay scheduler (linear warmup, constant LR, and 1-sqrt cooldown)
 # Following results from "Scaling Laws and Compute-Optimal Training Beyond Fixed Training Durations" https://arxiv.org/abs/2405.18392v1
@@ -392,23 +396,12 @@ def main(args, shard_config):
         while True:
             start_time = time.time()
 
-            train_loss, train_tokens, correct_tokens_count = train_one_step(
+            avg_train_loss, sum_tokens, sum_correct = train_one_step(
                 args, optimizer, model, dataloader)
 
-            if train_loss is None:
+            if avg_train_loss is None:
                 logger.info(f"Epoch {epoch} data exhausted on global_rank={args.global_rank} at step={step}")
                 break
-
-            # Sync variables between ranks
-            avg_train_loss = torch.tensor(train_loss, device=device)
-            sum_tokens = torch.tensor(train_tokens, device=device)
-            sum_correct = torch.tensor(correct_tokens_count, device=device)
-            dist.all_reduce(tensor=avg_train_loss, op=dist.ReduceOp.AVG)
-            dist.all_reduce(tensor=sum_tokens, op=dist.ReduceOp.SUM)
-            dist.all_reduce(tensor=sum_correct, op=dist.ReduceOp.SUM)
-            avg_train_loss = avg_train_loss.item()
-            sum_tokens = sum_tokens.item()
-            sum_correct = sum_correct.item()
 
             end_time = time.time()
             step_time = end_time - start_time
