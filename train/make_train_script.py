@@ -23,7 +23,7 @@ def generate_master_script(hosts, world_size, args, unknown_args):
     # Set trap to call the kill_remote_jobs function when SIGINT (CTRL+C) is received
     script_content += "\n# Set trap to call the kill_remote_jobs function when SIGINT (CTRL+C) is received\n"
     script_content += "kill_remote_jobs() {\n"
-    script_content += f"    pdsh -R ssh -w {','.join([f'{host}' for host, _ in hosts])} 'pkill -f shard_dataset.py'\n"
+    script_content += f"    pdsh -R ssh -w {','.join([f'{host}' for host, _ in hosts])} 'pkill -f train.py'\n"
     script_content += "}\n"
     script_content += "trap 'kill_remote_jobs' SIGINT\n\n"
 
@@ -34,8 +34,9 @@ def generate_master_script(hosts, world_size, args, unknown_args):
             f"\"{args.conda_dir}/envs/{args.conda_env}/bin/torchrun\"",
             f"--nproc_per_node={rank_count}",
             f"--nnodes={len(hosts)}",
+            f"--master_addr={args.master_addr}",
+            f"--master_port={args.master_port}",
             f"{args.source_dir}/train.py",
-            f"--master-addr={args.master_addr}",
         ]
         command_parts = command_parts + unknown_args
 
@@ -69,6 +70,7 @@ def main():
     parser.add_argument('--conda-dir', type=str, default="~/mambaforge", help="Conda environment directory.")
     parser.add_argument('--username', type=str, default=None, help="SSH username.")
     parser.add_argument("--master-addr", type=str, default=None, help="Address of master node. Default: First hosts.txt entry")
+    parser.add_argument("--master-port", type=int, default=12345, help="Port to use for the master node")
 
     # We interpret these args and pass the rest to the train.py script
     args, unknown_args = parser.parse_known_args()

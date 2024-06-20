@@ -284,9 +284,6 @@ def setup_fsdp(args, model):
 def main(args, shard_config):
     logger.info(f"Node local_rank={args.local_rank} global_rank={args.global_rank} local_world_size={args.local_world_size} world_size={args.world_size}")
 
-    os.environ['MASTER_ADDR'] = args.master_addr
-    os.environ['MASTER_PORT'] = str(args.master_port)
-
     dist.init_process_group(backend='nccl', rank=args.global_rank, world_size=args.world_size)
     torch.cuda.set_device(args.local_rank)
     device = torch.device("cuda")
@@ -484,10 +481,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint-interval", type=int, default=100, help="Steps between checkpoints")
 
     # Distributed training
-    parser.add_argument("--master-addr", type=str, default="localhost", help="Address of master node")
-    parser.add_argument("--master-port", type=int, default=12345, help="Port of master node")
     parser.add_argument("--shard-strategy", type=str, default="NO_SHARD", choices=["FULL_SHARD", "SHARD_GRAD_OP", "NO_SHARD", "HYBRID_SHARD"], help="Sharding strategy for FSDP")
-    #parser.add_argument("--world-size", type=int, default=None, help="Total number of GPUs in cluster")
 
     args = parser.parse_args()
 
