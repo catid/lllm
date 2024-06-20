@@ -106,7 +106,7 @@ class Mamba2Block(nn.Module):
                     expand=args.expand,
                     headdim=args.headdim)
 
-        _init_weights(self.mixer, layer_id)
+        #_init_weights(self.mixer, layer_id)
 
     def forward(self, x):
         return self.mixer(x)
