@@ -452,7 +452,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training")
 
     # Config
-    parser.add_argument("--output-dir", type=str, default="checkpoints", help="Path to model checkpoints for resuming") 
+    parser.add_argument("--output-dir", type=str, default="~/lllm_output", help="Path to model checkpoints for resuming") 
     parser.add_argument("--resume", action="store_true", help="Resume training from previous checkpoint")
     parser.add_argument("--seed", type=int, default=0, help="Seed for random numbers.  Set to -1 to pick a fully random seed")
     parser.add_argument("--compile", action="store_true", help="Enable torch.compile")
