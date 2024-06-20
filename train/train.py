@@ -37,6 +37,8 @@ import schedulefree
 
 from logger_tt import setup_logging, logger
 
+from train_args import add_training_arguments
+
 setup_logging(use_multiprocessing="fork")
 
 # Enable cuDNN benchmarking to improve online performance
@@ -487,14 +489,15 @@ if __name__ == "__main__":
     parser.add_argument("--master-addr", type=str, default="localhost", help="Address of master node")
     parser.add_argument("--master-port", type=int, default=12345, help="Port of master node")
     parser.add_argument("--shard-strategy", type=str, default="NO_SHARD", choices=["FULL_SHARD", "SHARD_GRAD_OP", "NO_SHARD", "HYBRID_SHARD"], help="Sharding strategy for FSDP")
+    #parser.add_argument("--world-size", type=int, default=None, help="Total number of GPUs in cluster")
 
     args = parser.parse_args()
 
     # Get environment variables from torchrun
     args.global_rank = int(os.getenv("RANK", "0"))
     args.local_rank = int(os.getenv("LOCAL_RANK", "0"))
-    args.world_size = int(os.getenv("WORLD_SIZE", "1"))
     args.local_world_size = int(os.getenv("LOCAL_WORLD_SIZE", "1"))
+    args.world_size = int(os.getenv("WORLD_SIZE", "1"))
 
     args.dataset_dir = os.path.abspath(os.path.expanduser(args.dataset_dir))
     args.holdout_dir = os.path.abspath(os.path.expanduser(args.holdout_dir))
