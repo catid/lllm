@@ -177,11 +177,12 @@ def train_one_step(args, optimizer, model, dataloader):
     optimizer.zero_grad(set_to_none=True)
 
     # Sync statistics between ranks
-    avg_loss = dist.all_reduce(tensor=sum_loss, op=dist.ReduceOp.AVG)
+    dist.all_reduce(tensor=sum_loss, op=dist.ReduceOp.AVG)
     dist.all_reduce(tensor=sum_tokens, op=dist.ReduceOp.SUM)
     dist.all_reduce(tensor=sum_correct, op=dist.ReduceOp.SUM)
 
-    return avg_loss.item(), sum_tokens.item(), sum_correct.item()
+    # Note: sum_loss is now average loss
+    return sum_loss.item(), sum_tokens.item(), sum_correct.item()
 
 # learning rate decay scheduler (linear warmup, constant LR, and 1-sqrt cooldown)
 # Following results from "Scaling Laws and Compute-Optimal Training Beyond Fixed Training Durations" https://arxiv.org/abs/2405.18392v1
