@@ -18,7 +18,7 @@ def read_hosts(file_path):
 # Function to generate the master shell script using parallel and pdsh
 def generate_master_script(hosts, world_size, args, unknown_args):
     script_content = "#!/bin/bash\n"
-    script_content += "# Master script to execute shard_dataset.py on multiple hosts using parallel and pdsh\n\n"
+    script_content += "# Master script to execute train.py on multiple hosts using parallel and pdsh\n"
 
     # Set trap to call the kill_remote_jobs function when SIGINT (CTRL+C) is received
     script_content += "\n# Set trap to call the kill_remote_jobs function when SIGINT (CTRL+C) is received\n"
