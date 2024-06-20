@@ -6,15 +6,29 @@ from torch.utils.checkpoint import checkpoint
 
 import math
 
+from .srmsnorm import FastSimpleRMSNorm
+
 from dataclasses import dataclass
+
+@dataclass
+class LatentLanguageConfig:
+    n_vocab: int = 0 # Set to tokenizer n_vocab
+
+    n_embd: int = 768
+    bias: bool = False
+    dropout: float = 0.2
+    n_head: int = 12
+    n_layer: int = 12
+    block_size: int = 256
+    ffn_mult: int = 4
+
+    enable_checkpointing: bool = False
 
 #
 #Model TODO:
 #* Mamba2 interleaved with SWA layers
 #* SWA + Primer Spatial D-Conv 3x1: https://arxiv.org/pdf/2109.08668v2 (Figure 4)
 #* Produce 2 tokens at once using 2x MLP heads
-#* RWKV_CMix_x060
-#* SRMSNorm
 
 class RWKV_CMix_x060(nn.Module):
     def __init__(self, args, layer_id):
@@ -31,9 +45,9 @@ class RWKV_CMix_x060(nn.Module):
             self.time_maa_k = nn.Parameter(1.0 - torch.pow(ddd, ratio_1_to_almost0))
             self.time_maa_r = nn.Parameter(1.0 - torch.pow(ddd, ratio_1_to_almost0))
 
-        self.key = nn.Linear(args.n_embd, args.dim_ffn, bias=False)
+        self.key = nn.Linear(args.n_embd, args.n_embd * args.ffn_mult, bias=False)
         self.receptance = nn.Linear(args.n_embd, args.n_embd, bias=False)
-        self.value = nn.Linear(args.dim_ffn, args.n_embd, bias=False)
+        self.value = nn.Linear(args.n_embd * args.ffn_mult, args.n_embd, bias=False)
 
     def forward(self, x):
         xx = self.time_shift(x) - x
@@ -46,17 +60,6 @@ class RWKV_CMix_x060(nn.Module):
         # TBD: Gate per head here instead
         # TBD: Gate next layer per head via mask
         return torch.sigmoid(self.receptance(xr)) * kv
-
-class LayerNorm(nn.Module):
-    """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
-
-    def __init__(self, ndim, bias):
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(ndim))
-        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
-
-    def forward(self, input):
-        return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
 
 class CausalSelfAttention(nn.Module):
 
@@ -91,48 +94,17 @@ class CausalSelfAttention(nn.Module):
         y = self.resid_dropout(self.c_proj(y))
         return y
 
-class MLP(nn.Module):
-
-    def __init__(self, config):
-        super().__init__()
-        self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
-        self.gelu    = nn.GELU()
-        self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
-        self.dropout = nn.Dropout(config.dropout)
-
-    def forward(self, x):
-        x = self.c_fc(x)
-        x = self.gelu(x)
-        x = self.c_proj(x)
-        x = self.dropout(x)
-        return x
-
 class Block(nn.Module):
-
-    def __init__(self, config):
+    def __init__(self, args, layer_id):
         super().__init__()
-        self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
-        self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
-        self.mlp = MLP(config)
+        self.ln = FastSimpleRMSNorm(args.n_embd)
+        self.attn = CausalSelfAttention(args)
+        self.mlp = RWKV_CMix_x060(args, layer_id)
 
     def forward(self, x, mask):
-        x = x + self.attn(self.ln_1(x), mask=mask)
-        x = x + self.mlp(self.ln_2(x))
+        x = x + self.attn(self.ln(x), mask=mask)
+        x = x + self.mlp(self.ln(x))
         return x
-
-@dataclass
-class LatentLanguageConfig:
-    n_vocab: int = 0 # Set to tokenizer n_vocab
-
-    n_embd: int = 768
-    bias: bool = False
-    dropout: float = 0.2
-    n_head: int = 12
-    layers: int = 12
-    block_size: int = 256
-
-    enable_checkpointing: bool = False
 
 class LatentLanguage(nn.Module):
     def __init__(self, cfg):
@@ -145,8 +117,8 @@ class LatentLanguage(nn.Module):
 
         self.layers = nn.ModuleList()
 
-        for _ in range(cfg.layers):
-            self.layers.append(Block(config=cfg))
+        for layer_id in range(cfg.n_layer):
+            self.layers.append(Block(cfg, layer_id))
 
         self.lm_head = nn.Linear(cfg.n_embd, cfg.n_vocab)
 
