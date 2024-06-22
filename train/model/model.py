@@ -29,7 +29,6 @@ class LatentLanguageConfig:
 
 #
 #Model TODO:
-#* SWA + Primer Spatial D-Conv 3x1: https://arxiv.org/pdf/2109.08668v2 (Figure 4)
 #* Produce 2 tokens at once using 2x MLP heads
 
 # activation functions
@@ -115,20 +114,54 @@ class CausalSelfAttention(nn.Module):
         y = self.resid_dropout(self.c_proj(y))
         return y
 
-class MultiQueryAttention(nn.Module):
+# Adapted from https://nn.labml.ai/transformers/primer_ez/index.html
+class SpatialDepthWiseConvolution(nn.Module):
+    def __init__(self, head_dim: int, kernel_size: int = 3):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.conv = nn.Conv1d(
+            in_channels=head_dim,
+            out_channels=head_dim,
+            kernel_size=(kernel_size,),
+            padding=(kernel_size - 1,),
+            groups=head_dim)
+
+    def forward(self, x: torch.Tensor):
+        # x has shape [B, heads, seq_len, head_dim]
+        B, heads, seq_len, head_dim = x.shape
+        # Permute to [B, heads, head_dim, seq_len]
+        x = x.permute(0, 1, 3, 2)
+        # Change the shape to [B * heads, head_dim, seq_len]
+        x = x.view(B * heads, head_dim, seq_len)
+        x = self.conv(x)
+        # Crop the right most kernel_size - 1 results since we padded both sides
+        x = x[:, :, :-(self.kernel_size - 1)]
+        # Reshape to [B, heads, head_dim, seq_len]
+        x = x.view(B, heads, head_dim, seq_len)
+        # Permute to [B, heads, seq_len, head_dim]
+        x = x.permute(0, 1, 3, 2)
+        return x
+
+# Multi-query attention: https://arxiv.org/pdf/1911.02150
+# Primer-EZ DConv: https://arxiv.org/pdf/2109.08668v2
+class MultiQueryAttentionDConv(nn.Module):
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
-        # query projections for all heads, key and value projections for one head
-        self.c_attn = nn.Linear(config.n_embd, config.n_embd + 2 * (config.n_embd // config.n_head), bias=config.bias)
-        # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        # regularization
-        self.attn_dropout = nn.Dropout(config.dropout)
-        self.resid_dropout = nn.Dropout(config.dropout)
+        self.head_dim = config.n_embd // config.n_head  # head dimension
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
+        # query projections for all heads, key and value projections for one head
+        self.c_attn = nn.Linear(config.n_embd, config.n_embd + 2 * self.head_dim, bias=config.bias)
+        # output projection
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        # regularization
+        self.resid_dropout = nn.Dropout(config.dropout)
+        # causal depthwise convolutions for Q, K, and V
+        self.q_conv = SpatialDepthWiseConvolution(self.head_dim)
+        self.k_conv = SpatialDepthWiseConvolution(self.head_dim)
+        self.v_conv = SpatialDepthWiseConvolution(self.head_dim)
 
     def forward(self, x, mask=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -145,63 +178,9 @@ class MultiQueryAttention(nn.Module):
         k = k.unsqueeze(1) # (B, 1, T, hs)
         v = v.unsqueeze(1) # (B, 1, T, hs)
 
-        # efficient attention using Flash Attention CUDA kernels
-        dropout = self.dropout if self.training else 0
-        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout, is_causal=True)
-
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
-
-        # output projection
-        y = self.resid_dropout(self.c_proj(y))
-        return y
-
-class MultiQueryAttentionPEZ(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        assert config.n_embd % config.n_head == 0
-        self.head_dim = config.n_embd // config.n_head
-        self.n_head = config.n_head
-        self.n_embd = config.n_embd
-        self.dropout = config.dropout
-
-        # query projections for all heads, key and value projections for one head
-        self.c_attn = nn.Linear(config.n_embd, config.n_embd + 2 * self.head_dim, bias=config.bias)
-        # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        # regularization
-        self.resid_dropout = nn.Dropout(config.dropout)
-
-        # Causal depthwise convolutions for Q, K, and V
-        self.q_conv = nn.Conv1d(self.n_embd, self.n_embd, kernel_size=3, padding=2, groups=self.n_embd)
-        self.k_conv = nn.Conv1d(self.head_dim, self.head_dim, kernel_size=3, padding=2, groups=self.head_dim)
-        self.v_conv = nn.Conv1d(self.head_dim, self.head_dim, kernel_size=3, padding=2, groups=self.head_dim)
-
-    def causal_conv1d(self, x, conv):
-        # Ensure causal convolution by masking future timesteps
-        padding = conv.padding[0]
-        x = F.pad(x, (padding, 0))  # Pad left side only
-        x = conv(x)
-        return x[:, :, :x.size(2) - padding]  # Remove extra padding on right side
-
-    def forward(self, x, mask=None):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
-
-        # calculate query for all heads, and key & value for a single head
-        qkv = self.c_attn(x)
-        q = qkv[..., :self.n_embd]
-        k = qkv[..., self.n_embd:self.n_embd + self.head_dim]
-        v = qkv[..., -self.head_dim:]
-
-        # Apply causal depthwise convolutions
-        q = self.causal_conv1d(q.transpose(1, 2), self.q_conv).transpose(1, 2)
-        k = self.causal_conv1d(k.transpose(1, 2), self.k_conv).transpose(1, 2)
-        v = self.causal_conv1d(v.transpose(1, 2), self.v_conv).transpose(1, 2)
-
-        # split query into multiple heads
-        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2) # (B, nh, T, hs)
-        # k and v remain single-headed
-        k = k.unsqueeze(1) # (B, 1, T, hs)
-        v = v.unsqueeze(1) # (B, 1, T, hs)
+        q = self.q_conv(q)
+        k = self.k_conv(k)
+        v = self.v_conv(v)
 
         # efficient attention using Flash Attention CUDA kernels
         dropout = self.dropout if self.training else 0
@@ -223,7 +202,7 @@ class Block(nn.Module):
                     d_conv=args.d_conv,
                     expand=args.expand,
                     headdim=args.headdim)
-        self.attn = MultiQueryAttention(args)
+        self.attn = MultiQueryAttentionDConv(args)
         self.mlp = RWKV_CMix_x060(args, layer_id)
 
     def forward(self, x):
