@@ -263,7 +263,7 @@ def main():
     parser.add_argument('--rank-count', type=int, default=1, help="Number of shards for this node.")
     parser.add_argument('--world-size', type=int, default=1, help="Total number of shards.")
     parser.add_argument('--output-dir', type=str, default="dataset_shard", help="Output directory.")
-    parser.add_argument('--encoding', type=str, default="o200k_base", help="Tiktoken encoding.")
+    parser.add_argument('--encoding', type=str, default="p50k_base", help="Tiktoken encoding.")
     parser.add_argument('--just-args', action="store_true", help="Just write the args file and exit.")
     parser.add_argument('--byte-tokens', action="store_true", help="Tokenize using byte tokens instead of word tokens.")
     parser.add_argument('--num-workers', type=int, default=4, help="Number of worker processes.")

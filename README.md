@@ -25,6 +25,7 @@ Follow the instructions in the `train/` directory.
 
 Dataloader TODO:
 * Add support for returning the list of concatenated samples in flash_attn format
+* Add support for DCLM-Baseline 4T: https://huggingface.co/datasets/mlfoundations/dclm-baseline-1.0
 
 Dataloader future improvements:
 * RHO-loss for the dataset using LLaMA-3 8B to provide reference loss for each token - need to convert to our tokenizer via approximation
