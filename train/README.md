@@ -16,3 +16,12 @@ python make_train_script.py
 
 ./launch_train.sh
 ```
+
+Or test locally:
+
+```bash
+cd training
+conda activate lllm
+
+torchrun --standalone --nproc_per_node=2 train.py
+```

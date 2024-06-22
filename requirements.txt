@@ -1,14 +1,11 @@
 # Community projects
-packaging
 numpy==1.26.4
 einops
 pytest
 tqdm
 pyyaml
-causal-conv1d
 mamba_ssm
 logger_tt
-torch-optimi
 lomo-optim
 flash-attn
 
