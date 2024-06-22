@@ -10,6 +10,7 @@ git+https://github.com/sustcsonglin/flash-linear-attention
 logger_tt
 torch-optimi
 lomo-optim
+flash-attn
 
 # Dataset dependencies
 build
