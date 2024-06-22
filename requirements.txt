@@ -9,6 +9,7 @@ mamba_ssm
 git+https://github.com/sustcsonglin/flash-linear-attention
 logger_tt
 torch-optimi
+lomo-optim
 
 # Dataset dependencies
 build

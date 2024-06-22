@@ -12,12 +12,13 @@ from dataclasses import dataclass
 @dataclass
 class LatentLanguageConfig:
     n_vocab: int = 0 # Set to tokenizer n_vocab
+    padding_token: int = 0
 
-    n_embd: int = 768
+    n_embd: int = 512
     bias: bool = False
     dropout: float = 0.2
-    n_head: int = 12
-    n_layer: int = 12
+    n_head: int = 8
+    n_layer: int = 6
 
     ffn_mult: int = 4
 
@@ -30,6 +31,23 @@ class LatentLanguageConfig:
 #Model TODO:
 #* SWA + Primer Spatial D-Conv 3x1: https://arxiv.org/pdf/2109.08668v2 (Figure 4)
 #* Produce 2 tokens at once using 2x MLP heads
+
+# activation functions
+
+class ReLUSquared(nn.Module):
+    """ Introduced by Noam's Primer paper: https://arxiv.org/pdf/2109.08668v2 """
+    def forward(self, x):
+        return F.relu(x) ** 2
+
+class LaplacianActFn(nn.Module):
+    """ https://arxiv.org/abs/2209.10655 claims this is more stable than Relu squared """
+
+    def forward(self, x):
+        mu = math.sqrt(0.5)
+        std = math.sqrt((4 * math.pi) ** -1)
+        return (1 + torch.special.erf((x - mu) / (std * math.sqrt(2)))) * 0.5
+
+# FFN layer
 
 class RWKV_CMix_x060(nn.Module):
     def __init__(self, args, layer_id):
@@ -50,65 +68,19 @@ class RWKV_CMix_x060(nn.Module):
         self.receptance = nn.Linear(args.n_embd, args.n_embd, bias=False)
         self.value = nn.Linear(args.n_embd * args.ffn_mult, args.n_embd, bias=False)
 
+        self.act = LaplacianActFn()
+
     def forward(self, x):
         xx = self.time_shift(x) - x
         xk = x + xx * self.time_maa_k
         xr = x + xx * self.time_maa_r
 
         k = self.key(xk)
-        k = torch.relu(k) ** 2
+        k = self.act(k)
         kv = self.value(k)
         # TBD: Gate per head here instead
         # TBD: Gate next layer per head via mask
         return torch.sigmoid(self.receptance(xr)) * kv
-
-# https://github.com/huggingface/transformers/blob/c28d04e9e252a1a099944e325685f14d242ecdcd/src/transformers/models/gpt2/modeling_gpt2.py#L454
-def _init_weights(
-    module,
-    n_layer,
-    initializer_range=0.02,  # Now only used for embedding layer.
-    rescale_prenorm_residual=True,
-    n_residuals_per_layer=1,  # Change to 2 if we have MLP
-):
-    if isinstance(module, nn.Linear):
-        if module.bias is not None:
-            if not getattr(module.bias, "_no_reinit", False):
-                nn.init.zeros_(module.bias)
-    elif isinstance(module, nn.Embedding):
-        nn.init.normal_(module.weight, std=initializer_range)
-
-    if rescale_prenorm_residual:
-        # Reinitialize selected weights subject to the OpenAI GPT-2 Paper Scheme:
-        #   > A modified initialization which accounts for the accumulation on the residual path with model depth. Scale
-        #   > the weights of residual layers at initialization by a factor of 1/√N where N is the # of residual layers.
-        #   >   -- GPT-2 :: https://openai.com/blog/better-language-models/
-        #
-        # Reference (Megatron-LM): https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/model/gpt_model.py
-        for name, p in module.named_parameters():
-            if name in ["out_proj.weight", "fc2.weight"]:
-                # Special Scaled Initialization --> There are 2 Layer Norms per Transformer Block
-                # Following Pytorch init, except scale by 1/sqrt(2 * n_layer)
-                # We need to reinit p since this code could be called multiple times
-                # Having just p *= scale would repeatedly scale it down
-                nn.init.kaiming_uniform_(p, a=math.sqrt(5))
-                with torch.no_grad():
-                    p /= math.sqrt(n_residuals_per_layer * n_layer)
-
-class Mamba2Block(nn.Module):
-    def __init__(self, args, layer_id):
-        super().__init__()
-
-        self.mixer = Mamba2(
-                    d_model=args.n_embd,
-                    d_state=args.d_state,
-                    d_conv=args.d_conv,
-                    expand=args.expand,
-                    headdim=args.headdim)
-
-        #_init_weights(self.mixer, layer_id)
-
-    def forward(self, x):
-        return self.mixer(x)
 
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
@@ -135,7 +107,106 @@ class CausalSelfAttention(nn.Module):
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
         # efficient attention using Flash Attention CUDA kernels
-        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=self.dropout if self.training else 0, is_causal=True)
+        dropout = self.dropout if self.training else 0
+        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout, is_causal=True)
+        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+
+        # output projection
+        y = self.resid_dropout(self.c_proj(y))
+        return y
+
+class MultiQueryAttention(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        assert config.n_embd % config.n_head == 0
+        # query projections for all heads, key and value projections for one head
+        self.c_attn = nn.Linear(config.n_embd, config.n_embd + 2 * (config.n_embd // config.n_head), bias=config.bias)
+        # output projection
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        # regularization
+        self.attn_dropout = nn.Dropout(config.dropout)
+        self.resid_dropout = nn.Dropout(config.dropout)
+        self.n_head = config.n_head
+        self.n_embd = config.n_embd
+        self.dropout = config.dropout
+
+    def forward(self, x, mask=None):
+        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+
+        # calculate query for all heads, and key & value for a single head
+        qkv = self.c_attn(x)
+        q = qkv[..., :self.n_embd]
+        k = qkv[..., self.n_embd:self.n_embd + C // self.n_head]
+        v = qkv[..., -C // self.n_head:]
+
+        # split query into multiple heads
+        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        # k and v remain single-headed
+        k = k.unsqueeze(1) # (B, 1, T, hs)
+        v = v.unsqueeze(1) # (B, 1, T, hs)
+
+        # efficient attention using Flash Attention CUDA kernels
+        dropout = self.dropout if self.training else 0
+        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout, is_causal=True)
+
+        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+
+        # output projection
+        y = self.resid_dropout(self.c_proj(y))
+        return y
+
+class MultiQueryAttentionPEZ(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        assert config.n_embd % config.n_head == 0
+        self.head_dim = config.n_embd // config.n_head
+        self.n_head = config.n_head
+        self.n_embd = config.n_embd
+        self.dropout = config.dropout
+
+        # query projections for all heads, key and value projections for one head
+        self.c_attn = nn.Linear(config.n_embd, config.n_embd + 2 * self.head_dim, bias=config.bias)
+        # output projection
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        # regularization
+        self.resid_dropout = nn.Dropout(config.dropout)
+
+        # Causal depthwise convolutions for Q, K, and V
+        self.q_conv = nn.Conv1d(self.n_embd, self.n_embd, kernel_size=3, padding=2, groups=self.n_embd)
+        self.k_conv = nn.Conv1d(self.head_dim, self.head_dim, kernel_size=3, padding=2, groups=self.head_dim)
+        self.v_conv = nn.Conv1d(self.head_dim, self.head_dim, kernel_size=3, padding=2, groups=self.head_dim)
+
+    def causal_conv1d(self, x, conv):
+        # Ensure causal convolution by masking future timesteps
+        padding = conv.padding[0]
+        x = F.pad(x, (padding, 0))  # Pad left side only
+        x = conv(x)
+        return x[:, :, :x.size(2) - padding]  # Remove extra padding on right side
+
+    def forward(self, x, mask=None):
+        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+
+        # calculate query for all heads, and key & value for a single head
+        qkv = self.c_attn(x)
+        q = qkv[..., :self.n_embd]
+        k = qkv[..., self.n_embd:self.n_embd + self.head_dim]
+        v = qkv[..., -self.head_dim:]
+
+        # Apply causal depthwise convolutions
+        q = self.causal_conv1d(q.transpose(1, 2), self.q_conv).transpose(1, 2)
+        k = self.causal_conv1d(k.transpose(1, 2), self.k_conv).transpose(1, 2)
+        v = self.causal_conv1d(v.transpose(1, 2), self.v_conv).transpose(1, 2)
+
+        # split query into multiple heads
+        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2) # (B, nh, T, hs)
+        # k and v remain single-headed
+        k = k.unsqueeze(1) # (B, 1, T, hs)
+        v = v.unsqueeze(1) # (B, 1, T, hs)
+
+        # efficient attention using Flash Attention CUDA kernels
+        dropout = self.dropout if self.training else 0
+        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout, is_causal=True)
+
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
@@ -146,33 +217,40 @@ class Block(nn.Module):
     def __init__(self, args, layer_id):
         super().__init__()
         self.ln = FastSimpleRMSNorm(args.n_embd)
-        self.attn = Mamba2Block(args, layer_id)
+        self.mamba = Mamba2(
+                    d_model=args.n_embd,
+                    d_state=args.d_state,
+                    d_conv=args.d_conv,
+                    expand=args.expand,
+                    headdim=args.headdim)
+        self.attn = MultiQueryAttention(args)
         self.mlp = RWKV_CMix_x060(args, layer_id)
 
     def forward(self, x):
+        x = x + self.mamba(self.ln(x))
         x = x + self.attn(self.ln(x))
         x = x + self.mlp(self.ln(x))
         return x
 
 class LatentLanguage(nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, args):
         super().__init__()
 
-        self.cfg = cfg
+        self.args = args
 
-        self.embedding = nn.Embedding(cfg.n_vocab, cfg.n_embd)
+        self.embedding = nn.Embedding(args.n_vocab, args.n_embd)
 
         self.layers = nn.ModuleList()
 
-        for layer_id in range(cfg.n_layer):
-            self.layers.append(Block(cfg, layer_id))
+        for layer_id in range(args.n_layer):
+            self.layers.append(Block(args, layer_id))
 
-        self.lm_head = nn.Linear(cfg.n_embd, cfg.n_vocab)
+        self.lm_head = nn.Linear(args.n_embd, args.n_vocab)
 
         # Tie vocab weights
         self.lm_head.weight = self.embedding.weight
 
-        self.drop = nn.Dropout(cfg.dropout)
+        self.drop = nn.Dropout(args.dropout)
 
     def forward(self, x, targets):
         B, N = x.size()
@@ -180,7 +258,7 @@ class LatentLanguage(nn.Module):
         # True: should take part in attention
         #attn_mask = (x != -1).unsqueeze(1).unsqueeze(2)
 
-        x = x.masked_fill(x == -1, 0) # replace padding with some other value
+        x = x.masked_fill(x == -1, self.args.padding_token)
 
         x = self.embedding(x)
 

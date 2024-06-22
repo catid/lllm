@@ -34,6 +34,7 @@ import wandb
 from cpp_dataloader import DataLoader, DataVerifier, EpochConfig
 
 import schedulefree
+from lomo_optim import AdaLomo
 
 from logger_tt import setup_logging, logger
 
@@ -55,8 +56,7 @@ torch.backends.cudnn.benchmark = True
 torch.autograd.profiler.emit_nvtx(False)
 torch.autograd.profiler.profile(False)
 
-def is_main_process():
-    return dist.get_rank() == 0
+is_main_process = False
 
 def round_up_to_next_multiple_of_128(x):
     if x % 128 == 0:
@@ -164,7 +164,7 @@ def train_one_step(args, optimizer, model, dataloader):
         sum_correct += torch.sum((predictions == targets) & (targets != -1))
 
         if args.shard_strategy == "NO_SHARD":
-            model.require_backward_grad_sync = (grad_accum_step + 1 == args.grad_accum)
+            model.require_backward_grad_sync = (grad_accum_step + 1 >= args.grad_accum)
         loss.backward()
 
     norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
@@ -278,6 +278,8 @@ def setup_fsdp(args, model):
         shard_strategy = ShardingStrategy.SHARD_GRAD_OP
     elif args.shard_strategy == "HYBRID_SHARD":
         shard_strategy = ShardingStrategy.HYBRID_SHARD
+    elif args.shard_strategy == "NO_SHARD":
+        shard_strategy = ShardingStrategy.NO_SHARD
     else:
         raise ValueError(f"Unknown sharding strategy: {args.shard_strategy}")
 
@@ -302,36 +304,45 @@ def main(args, shard_config):
     torch.cuda.set_device(args.local_rank)
     device = torch.device("cuda")
 
-    if is_main_process():
+    if is_main_process:
         logger.info(f"Arguments: {args}")
 
     cfg = LatentLanguageConfig()
-    cfg.n_vocab = round_up_to_next_multiple_of_128(shard_config["n_vocab"])
+    cfg.n_vocab = round_up_to_next_multiple_of_128(shard_config["n_vocab"] + 1)
+    cfg.padding_token = shard_config["n_vocab"] # Use largest token value as padding token
 
     cfg.block_size = args.context
     model = LatentLanguage(cfg).to(device).to(torch.bfloat16)
 
     model = setup_fsdp(args, model)
 
-    optimizer = schedulefree.AdamWScheduleFree(
-        model.parameters(),
-        lr=args.lr,
-        weight_decay=args.weight_decay)
+    if args.optimizer == "schedulefree":
+        optimizer = schedulefree.AdamWScheduleFree(
+            model.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay)
+    elif args.optimizer == "adalomo":
+        optimizer = AdaLomo(
+            model.parameters(),
+            lr=args.lr,
+            loss_scale=2 ** 10)
+    else:
+        raise ValueError(f"Unknown optimizer: {args.optimizer}")
 
     params = count_parameters(model)
-    if is_main_process():
+    if is_main_process:
         logger.info(f"Total model parameters: {params/1000000.0:.2f}M")
 
     if args.verify_dataset:
-        logger.info("Verifying dataset... (should take about one minute per 0.4T tokens using an SSD)")
+        if is_main_process:
+            logger.info("Verifying dataset... (should take about one minute per 0.4T tokens using an SSD)")
 
-        if is_main_process():
             is_valid = DataVerifier.verify(args.dataset_dir)
 
             if not is_valid:
                 raise RuntimeError("Dataset is corrupted and must be regenerated using dataset/shard_dataset.py")
 
-    if is_main_process():
+    if is_main_process:
         if not os.path.exists(args.output_dir):
             os.makedirs(args.output_dir)
 
@@ -340,7 +351,7 @@ def main(args, shard_config):
     args.seed = synchronize_seed(args)
 
     # Weights & Biases
-    if args.wandb and is_main_process():
+    if args.wandb and is_main_process:
         if not args.name:
             raise RuntimeError("The --name argument is required when using --wandb")
         wandb.init(project=args.project, name=args.name, config=args)
@@ -411,7 +422,7 @@ def main(args, shard_config):
             tokens_per_second = sum_tokens / step_time
             correct_pct = sum_correct * 100.0 / sum_tokens
 
-            if is_main_process():
+            if is_main_process:
                 logger.info(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec correct={correct_pct:.2f}% Tokens={tokens/1000000.0:.2f}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
 
             step += 1
@@ -469,9 +480,10 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str, default="my_project", help="Collection of experiments on wandb")
 
     # Hyperparameters
-    parser.add_argument("--context", type=int, default=4096, help="Context size for each microbatch")
+    parser.add_argument("--context", type=int, default=4097, help="Context size for each microbatch")
     parser.add_argument("--microbatch", type=int, default=1, help="Microbatch size")
     parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
+    parser.add_argument("--optimizer", type=str, default="schedulefree", help="Options: schedulefree, adalomo")
     parser.add_argument("--lr", type=float, default=4e-4, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
@@ -490,6 +502,7 @@ if __name__ == "__main__":
 
     # Get environment variables from torchrun
     args.global_rank = int(os.getenv("RANK", "0"))
+    is_main_process = args.global_rank == 0
     args.local_rank = int(os.getenv("LOCAL_RANK", "0"))
     args.local_world_size = int(os.getenv("LOCAL_WORLD_SIZE", "1"))
     args.world_size = int(os.getenv("WORLD_SIZE", "1"))
