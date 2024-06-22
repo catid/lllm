@@ -67,6 +67,10 @@
             cmd: "{{ lookup('env', 'HOME') }}/mambaforge/bin/conda create -y --name lllm python=3.10"
       when: conda_env_output.rc != 0
 
+    - name: Install PyTorch
+      shell: |
+        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/pip3" install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu124
+
     - name: Install pip requirements.txt
       shell: |
         cd "{{ lookup('env', 'HOME') }}/lllm"

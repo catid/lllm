@@ -31,6 +31,9 @@ echo "ansible_become_password: PASSWORD" > sudo.yml
 
 sudo apt install ansible
 
+# Set up CUDA
+ansible-playbook install_cuda.yml
+
 # Set up Conda
 ansible-playbook install_conda.yml
 
