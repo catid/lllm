@@ -27,10 +27,6 @@ class LatentLanguageConfig:
     expand: int = 2
     headdim: int = 64
 
-#
-#Model TODO:
-#* Produce 2 tokens at once using 2x MLP heads
-
 # activation functions
 
 class ReLUSquared(nn.Module):
@@ -38,8 +34,9 @@ class ReLUSquared(nn.Module):
     def forward(self, x):
         return F.relu(x) ** 2
 
+# Kind of like ReLU^2 but bounded output
 class LaplacianActFn(nn.Module):
-    """ https://arxiv.org/abs/2209.10655 claims this is more stable than Relu squared """
+    """ Introduced in a different context here: https://arxiv.org/abs/2209.10655 """
 
     def forward(self, x):
         mu = math.sqrt(0.5)
@@ -211,6 +208,7 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln(x))
         return x
 
+# Predicts next two tokens
 class LatentLanguage(nn.Module):
     def __init__(self, args):
         super().__init__()
@@ -224,6 +222,10 @@ class LatentLanguage(nn.Module):
         for layer_id in range(args.n_layer):
             self.layers.append(Block(args, layer_id))
 
+        self.ln = FastSimpleRMSNorm(args.n_embd)
+        self.pred1 = RWKV_CMix_x060(args, args.n_layer)
+        self.pred2 = RWKV_CMix_x060(args, args.n_layer)
+
         self.lm_head = nn.Linear(args.n_embd, args.n_vocab)
 
         # Tie vocab weights
@@ -231,7 +233,7 @@ class LatentLanguage(nn.Module):
 
         self.drop = nn.Dropout(args.dropout)
 
-    def forward(self, x, targets):
+    def forward(self, x, targets_1, targets_2):
         B, N = x.size()
 
         # True: should take part in attention
@@ -246,12 +248,27 @@ class LatentLanguage(nn.Module):
         for block in self.layers:
             x = block(x)
 
-        logits = self.lm_head(x)
+        # Apply output prediction heads
+        x1 = self.pred1(self.ln(x))
+        x2 = self.pred2(self.ln(x))
 
-        loss = F.cross_entropy(
-            logits.view(-1, logits.size(-1)),
-            targets.view(-1),
+        # Use the same lm_head for both predictions
+        logits_1 = self.lm_head(x1)
+        logits_2 = self.lm_head(x2)
+
+        # Calculate losses using provided targets
+        loss_1 = F.cross_entropy(
+            logits_1.view(-1, logits_1.size(-1)),
+            targets_1.view(-1),
             ignore_index=-1,
             reduction='mean')
 
-        return logits, loss
+        loss_2 = F.cross_entropy(
+            logits_2.view(-1, logits_2.size(-1)),
+            targets_2.view(-1),
+            ignore_index=-1,
+            reduction='mean')
+
+        loss = (loss_1 + loss_2) * 0.5
+
+        return logits_1, loss

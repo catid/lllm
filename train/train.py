@@ -150,18 +150,19 @@ def train_one_step(args, optimizer, model, dataloader):
             return None, None
 
         input_ids = torch.from_numpy(batch).to(torch.long).to(device)
-        labels = input_ids[..., :-1].contiguous()
-        targets = input_ids[..., 1:].contiguous()
+        labels = input_ids[..., :-2].contiguous()
+        targets_1 = input_ids[..., 1:-1].contiguous()
+        targets_2 = input_ids[..., 2:].contiguous()
 
-        sum_tokens += torch.sum(targets != -1)
+        sum_tokens += torch.sum(targets_1 != -1)
 
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            logits, loss = model(labels, targets)
+            logits, loss = model(labels, targets_1, targets_2)
             loss = loss / args.grad_accum
             sum_loss += loss.detach()
 
         predictions = torch.argmax(logits, dim=-1)
-        sum_correct += torch.sum((predictions == targets) & (targets != -1))
+        sum_correct += torch.sum((predictions == targets_1) & (targets_1 != -1))
 
         if args.shard_strategy == "NO_SHARD":
             model.require_backward_grad_sync = (grad_accum_step + 1 >= args.grad_accum)
@@ -480,7 +481,7 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str, default="my_project", help="Collection of experiments on wandb")
 
     # Hyperparameters
-    parser.add_argument("--context", type=int, default=4097, help="Context size for each microbatch")
+    parser.add_argument("--context", type=int, default=4098, help="Context size for each microbatch")
     parser.add_argument("--microbatch", type=int, default=1, help="Microbatch size")
     parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
     parser.add_argument("--optimizer", type=str, default="schedulefree", help="Options: schedulefree, adalomo")
