@@ -35,15 +35,6 @@ class ReLUSquared(nn.Module):
     def forward(self, x):
         return F.relu(x) ** 2
 
-# Kind of like ReLU^2 but bounded output
-class LaplacianActFn(nn.Module):
-    """ Introduced in a different context here: https://arxiv.org/abs/2209.10655 """
-
-    def forward(self, x):
-        mu = math.sqrt(0.5)
-        std = math.sqrt((4 * math.pi) ** -1)
-        return (1 + torch.special.erf((x - mu) / (std * math.sqrt(2)))) * 0.5
-
 # FFN layer
 
 class RWKV_CMix_x060(nn.Module):
@@ -65,7 +56,7 @@ class RWKV_CMix_x060(nn.Module):
         self.receptance = nn.Linear(args.n_embd, args.n_embd, bias=False)
         self.value = nn.Linear(args.n_embd * args.ffn_mult, args.n_embd, bias=False)
 
-        self.act = LaplacianActFn()
+        self.act = ReLUSquared()
 
     def forward(self, x):
         xx = self.time_shift(x) - x
