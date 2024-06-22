@@ -2,11 +2,11 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from flash_attn import flash_attn_func
 from .srmsnorm import FastSimpleRMSNorm
-
 from mamba_ssm import Mamba2
-import math
 
+import math
 from dataclasses import dataclass
 
 @dataclass
@@ -78,39 +78,6 @@ class RWKV_CMix_x060(nn.Module):
         # TBD: Gate next layer per head via mask
         return torch.sigmoid(self.receptance(xr)) * kv
 
-class CausalSelfAttention(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        assert config.n_embd % config.n_head == 0
-        # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
-        # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        # regularization
-        self.attn_dropout = nn.Dropout(config.dropout)
-        self.resid_dropout = nn.Dropout(config.dropout)
-        self.n_head = config.n_head
-        self.n_embd = config.n_embd
-        self.dropout = config.dropout
-
-    def forward(self, x, mask=None):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
-
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-
-        # efficient attention using Flash Attention CUDA kernels
-        dropout = self.dropout if self.training else 0
-        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout, is_causal=True)
-        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
-
-        # output projection
-        y = self.resid_dropout(self.c_proj(y))
-        return y
-
 # Adapted from https://nn.labml.ai/transformers/primer_ez/index.html
 class SpatialDepthWiseConvolution(nn.Module):
     def __init__(self, head_dim: int, kernel_size: int = 3):
@@ -180,8 +147,8 @@ class MultiQueryAttentionDConv(nn.Module):
         v = self.v_conv(v)
 
         # efficient attention using Flash Attention CUDA kernels
-        dropout = self.dropout if self.training else 0
-        y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout, is_causal=True)
+        dropout_p = self.dropout if self.training else 0
+        y = flash_attn_func(q, k, v, dropout_p=dropout_p, causal=True)
 
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
