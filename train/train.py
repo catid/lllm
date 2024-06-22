@@ -25,7 +25,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 from functools import partial
 
-from model.model import LatentLanguage, LatentLanguageConfig, CausalSelfAttention
+from model.model import LatentLanguage, LatentLanguageConfig, MultiQueryAttentionDConv
 
 import numpy as np
 
@@ -268,7 +268,7 @@ def setup_fsdp(args, model):
     t5_auto_wrap_policy = partial(
             transformer_auto_wrap_policy,
             transformer_layer_cls={
-                CausalSelfAttention,
+                MultiQueryAttentionDConv,
             },
         )
 
