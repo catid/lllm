@@ -4,8 +4,6 @@ from packaging import version
 import torch
 import torch.distributed as dist
 import deepspeed
-from deepspeed.runtime.zero.stage3 import DeepSpeedZeroOptimizer
-from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 
 from model.model import LatentLanguage, LatentLanguageConfig, MultiQueryAttentionDConv
 
@@ -103,7 +101,7 @@ def setup_deepspeed(args, model):
             "enabled": True,
         },
         "zero_optimization": {
-            "stage": 3,
+            "stage": 1,
             "offload_optimizer": {
                 "device": "cpu",
                 "pin_memory": True
@@ -335,6 +333,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--checkpoint-interval", type=int, default=100, help="Steps between checkpoints")
 
+    parser = deepspeed.add_config_arguments(parser)
+
     args = parser.parse_args()
 
     args.global_rank = int(os.getenv("RANK", "0"))
@@ -349,7 +349,7 @@ if __name__ == "__main__":
 
     if not os.path.exists(args.dataset_dir):
         raise RuntimeError(f"Dataset directory {args.dataset_dir} does not exist")
-if not os.path.exists(args.holdout_dir):
+    if not os.path.exists(args.holdout_dir):
         raise RuntimeError(f"Holdout directory {args.holdout_dir} does not exist")
 
     args_path = os.path.join(args.dataset_dir, "args.yml")
