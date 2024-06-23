@@ -4,6 +4,8 @@ from packaging import version
 import torch
 import torch.distributed as dist
 import deepspeed
+from deepspeed import comm
+from deepspeed import log_dist
 
 from model.model import LatentLanguage, LatentLanguageConfig, MultiQueryAttentionDConv
 
@@ -16,16 +18,15 @@ from cpp_dataloader import DataLoader, DataVerifier, EpochConfig
 import schedulefree
 from lomo_optim import AdaLomo
 
-from logger_tt import setup_logging, logger
+# Deepspeed logging functions
+def log_0(msg):
+    log_dist(msg, ranks=[0])
 
-def get_current_script_directory():
-    script_path = os.path.abspath(sys.argv[0])
-    script_dir = os.path.dirname(script_path)
-    return script_dir
+def log_all(msg):
+    log_dist(msg, ranks=[-1])
 
-setup_logging(
-    use_multiprocessing="fork",
-    log_path=os.path.join(get_current_script_directory(), "train.log"))
+def is_main_process():
+    return comm.get_rank() == 0
 
 # Enable cuDNN benchmarking to improve online performance
 torch.backends.cudnn.benchmark = True
@@ -33,8 +34,6 @@ torch.backends.cudnn.benchmark = True
 # Disable profiling to speed up training
 torch.autograd.profiler.emit_nvtx(False)
 torch.autograd.profiler.profile(False)
-
-is_main_process = False
 
 def round_up_to_next_multiple_of_128(x):
     if x % 128 == 0:
@@ -65,7 +64,7 @@ def synchronize_seed(args):
     np.random.seed(seed)
     random.seed(seed)
 
-    logger.info(f"Using seed: {seed} for shard_id={args.global_rank}")
+    log_all(f"Using seed: {seed} for shard_id={args.global_rank}")
     return seed
 
 def recreate_folder(folder_path):
@@ -168,32 +167,43 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def main(args, shard_config):
-    logger.info(f"Node local_rank={args.local_rank} global_rank={args.global_rank} local_world_size={args.local_world_size} world_size={args.world_size}")
-
-    if is_main_process:
-        logger.info(f"Arguments: {args}")
+    if is_main_process():
+        log_0(f"Arguments: {args}")
 
     cfg = LatentLanguageConfig()
     cfg.n_vocab = round_up_to_next_multiple_of_128(shard_config["n_vocab"] + 1)
     cfg.padding_token = shard_config["n_vocab"]
     cfg.block_size = args.context
-    
+
     model = LatentLanguage(cfg).cuda()
+
+    args.world_size = dist.get_world_size()
 
     model_engine, optimizer = setup_deepspeed(args, model)
 
+    # DeepSpeed engine
+    train_batch_size = model_engine.train_batch_size()
+    data_loader_batch_size = model_engine.train_micro_batch_size_per_gpu()
+
+    args.local_rank = model_engine.local_rank
+    args.global_rank = model_engine.global_rank
+
+    log_all(f"model_engine.world_size = {model_engine.world_size}")
+
+    log_all(f"Node local_rank={args.local_rank} global_rank={args.global_rank} world_size={args.world_size}")
+
     params = count_parameters(model)
-    if is_main_process:
-        logger.info(f"Total model parameters: {params/1000000.0:.2f}M")
+    if is_main_process():
+        log_0(f"Total model parameters: {params/1000000.0:.2f}M")
 
     if args.verify_dataset:
-        if is_main_process:
-            logger.info("Verifying dataset...")
+        if is_main_process():
+            log_0("Verifying dataset...")
             is_valid = DataVerifier.verify(args.dataset_dir)
             if not is_valid:
                 raise RuntimeError("Dataset is corrupted and must be regenerated using dataset/shard_dataset.py")
 
-    if is_main_process:
+    if is_main_process():
         if not os.path.exists(args.output_dir):
             os.makedirs(args.output_dir)
 
@@ -201,7 +211,7 @@ def main(args, shard_config):
 
     args.seed = synchronize_seed(args)
 
-    if args.wandb and is_main_process:
+    if args.wandb and is_main_process():
         if not args.name:
             raise RuntimeError("The --name argument is required when using --wandb")
         wandb.init(project=args.project, name=args.name, config=args)
@@ -221,12 +231,12 @@ def main(args, shard_config):
             total_steps = client_state.get("total_steps", 0)
             tokens = client_state.get("tokens", 0)
             wallclock_time = client_state.get("wallclock_time", 0.0)
-            logger.info(f"Loaded checkpoint at step={step} epoch={epoch}")
+            log_all(f"Loaded checkpoint at step={step} epoch={epoch}")
         else:
-            logger.info("No checkpoint found - Starting training from scratch")
+            log_all("No checkpoint found - Starting training from scratch")
     else:
         if args.local_rank == 0:
-            logger.info("Resetting training - deleting output directory")
+            log_0("Resetting training - deleting output directory")
             recreate_folder(args.output_dir)
         dist.barrier()
 
@@ -261,7 +271,7 @@ def main(args, shard_config):
                 args, model_engine, dataloader)
 
             if avg_train_loss is None:
-                logger.info(f"Epoch {epoch} data exhausted on global_rank={args.global_rank} at step={step}")
+                log_all(f"Epoch {epoch} data exhausted on global_rank={args.global_rank} at step={step}")
                 break
 
             end_time = time.time()
@@ -271,8 +281,8 @@ def main(args, shard_config):
             tokens_per_second = sum_tokens / step_time
             correct_pct = sum_correct * 100.0 / sum_tokens
 
-            if is_main_process:
-                logger.info(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec correct={correct_pct:.2f}% Tokens={tokens/1000000.0:.2f}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
+            if is_main_process():
+                log_0(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec correct={correct_pct:.2f}% Tokens={tokens/1000000.0:.2f}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
 
             step += 1
             total_steps += 1
@@ -296,12 +306,12 @@ def main(args, shard_config):
 
                 model_engine.save_checkpoint(args.output_dir, client_state=checkpoint_info)
 
-        logger.info(f"Epoch {epoch} complete on rank {args.global_rank}")
+        log_all(f"Epoch {epoch} complete on rank {args.global_rank}")
         epoch += 1
         step = 0
         dist.barrier()
 
-    logger.info(f"Training complete. Total steps: {total_steps}")
+    log_all(f"Training complete. Total steps: {total_steps}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Training")
@@ -333,15 +343,11 @@ if __name__ == "__main__":
 
     parser.add_argument("--checkpoint-interval", type=int, default=100, help="Steps between checkpoints")
 
+    parser.add_argument("--local_rank", type=int, default=-1, help="Local rank passed from distributed launcher")
+
     parser = deepspeed.add_config_arguments(parser)
 
     args = parser.parse_args()
-
-    args.global_rank = int(os.getenv("RANK", "0"))
-    is_main_process = args.global_rank == 0
-    args.local_rank = int(os.getenv("LOCAL_RANK", "0"))
-    args.local_world_size = int(os.getenv("LOCAL_WORLD_SIZE", "1"))
-    args.world_size = int(os.getenv("WORLD_SIZE", "1"))
 
     args.dataset_dir = os.path.abspath(os.path.expanduser(args.dataset_dir))
     args.holdout_dir = os.path.abspath(os.path.expanduser(args.holdout_dir))
@@ -357,12 +363,10 @@ if __name__ == "__main__":
         shard_config = yaml.safe_load(file)
 
     local_ranks = torch.cuda.device_count()
-    if local_ranks != args.local_world_size:
-        raise RuntimeError(f"Number of GPUs ({local_ranks}) does not match torchrun local_world_size ({args.local_world_size})")
     if local_ranks != shard_config["rank_count"]:
         raise RuntimeError(f"Number of GPUs ({local_ranks}) does not match rank_count from shard config ({shard_config['rank_count']})")
 
-    logger.info(f"Shard config: {shard_config}")
+    log_all(f"Shard config: {shard_config}")
 
     # Initialize DeepSpeed
     deepspeed.init_distributed()
