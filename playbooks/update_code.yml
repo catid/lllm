@@ -9,3 +9,14 @@
         dest: "{{ lookup('env', 'HOME') }}/lllm"
         update: "{{ lllm_repository.stat.exists }}"
         update: yes
+
+    - name: Build C++ dataloader
+      shell: |
+        cd "{{ lookup('env', 'HOME') }}/lllm/dataset/package"
+        rm -rf build dist cpp_dataloader.egg-info
+        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/python" -m build
+
+    - name: Install C++ dataloader
+      shell: |
+        cd "{{ lookup('env', 'HOME') }}/lllm/dataset/package"
+        "{{ lookup('env', 'HOME') }}/mambaforge/envs/lllm/bin/pip" install --force-reinstall "{{ lookup('env', 'HOME') }}/lllm/dataset/package/dist/cpp_dataloader-0.1.0-cp310-cp310-linux_x86_64.whl"
