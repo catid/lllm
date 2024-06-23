@@ -4,6 +4,8 @@
   become: yes
   vars_files:
     - sudo.yml
+  vars:
+    cuda_home: "/usr/local/cuda"  # Adjust this path as needed
   tasks:
     - name: Remove problematic CUDA repository files
       file:
@@ -80,4 +82,62 @@
         - /tmp/cuda-ubuntu2204.pin
         - /tmp/cuda-repo-ubuntu2204-12-5-local_12.5.0-555.42.02-1_amd64.deb
         - /tmp/cuda-repo.pub
+  
+    - name: Check if .zshrc exists
+      stat:
+        path: "{{ ansible_env.HOME }}/.zshrc"
+      register: zshrc_file
+
+    - name: Check if .bashrc exists
+      stat:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+      register: bashrc_file
+
+    - name: Add CUDA_HOME to .zshrc
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.zshrc"
+        line: "export CUDA_HOME={{ cuda_home }}"
+        regexp: '^export CUDA_HOME='
+        state: present
+      when: zshrc_file.stat.exists
+
+    - name: Add CUDA_HOME to .bashrc
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: "export CUDA_HOME={{ cuda_home }}"
+        regexp: '^export CUDA_HOME='
+        state: present
+      when: bashrc_file.stat.exists
+
+    - name: Add CUDA bin to PATH in .zshrc
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.zshrc"
+        line: "export PATH=$CUDA_HOME/bin:$PATH"
+        regexp: '^export PATH=\$CUDA_HOME/bin:\$PATH'
+        state: present
+      when: zshrc_file.stat.exists
+
+    - name: Add CUDA bin to PATH in .bashrc
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: "export PATH=$CUDA_HOME/bin:$PATH"
+        regexp: '^export PATH=\$CUDA_HOME/bin:\$PATH'
+        state: present
+      when: bashrc_file.stat.exists
+
+    - name: Add LD_LIBRARY_PATH in .zshrc
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.zshrc"
+        line: "export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH"
+        regexp: '^export LD_LIBRARY_PATH=\$CUDA_HOME/lib64:\$LD_LIBRARY_PATH'
+        state: present
+      when: zshrc_file.stat.exists
+
+    - name: Add LD_LIBRARY_PATH in .bashrc
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: "export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH"
+        regexp: '^export LD_LIBRARY_PATH=\$CUDA_HOME/lib64:\$LD_LIBRARY_PATH'
+        state: present
+      when: bashrc_file.stat.exists
   
