@@ -116,7 +116,7 @@ class MultiQueryAttentionDConv(nn.Module):
         # regularization
         self.resid_dropout = nn.Dropout(config.dropout)
         # causal depthwise convolutions for Q, K, and V
-        self.q_conv = SpatialDepthWiseConvolution(self.head_dim)
+        self.q_conv = SpatialDepthWiseConvolution(config.n_embd)
         self.k_conv = SpatialDepthWiseConvolution(self.head_dim)
         self.v_conv = SpatialDepthWiseConvolution(self.head_dim)
 
