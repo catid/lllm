@@ -110,7 +110,7 @@ class MultiQueryAttentionDConv(nn.Module):
         self.dropout = config.dropout
         self.window_size = config.window_size if hasattr(config, 'window_size') else (-1, -1)
         # query projections for all heads, key and value projections for one head
-        self.c_attn = nn.Linear(config.n_embd, config.n_embd + 2 * self.head_dim, bias=config.bias)
+        self.qkv = nn.Linear(config.n_embd, config.n_embd + 2 * self.head_dim, bias=config.bias)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
@@ -124,7 +124,7 @@ class MultiQueryAttentionDConv(nn.Module):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query for all heads, and key & value for a single head
-        qkv = self.c_attn(x)
+        qkv = self.qkv(x)
         q = qkv[..., :self.n_embd]
         k = qkv[..., self.n_embd:self.n_embd + C // self.n_head]
         v = qkv[..., -C // self.n_head:]

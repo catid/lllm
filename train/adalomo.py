@@ -1,3 +1,6 @@
+# From https://github.com/OpenLMLab/LOMO/blob/main/lomo_optim/adalomo.py
+# Modified to translate Chinese comments to English, and to support 3D tensors for Samba model architecture
+
 import math
 
 import torch

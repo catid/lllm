@@ -55,6 +55,8 @@ https://arxiv.org/pdf/2406.06484
 Needs some fixes from master mamba branch
 * Mamba2 h_t ring buffer: https://x.com/MrCatid/status/1800995821543907626
 * Samba: SWA cross-attend to much earlier tokens deeper in to avoid squashed representation collapse
+* VQVAE compression of embedding layers: https://arxiv.org/abs/2406.11837
+* SparseK KV cache compression: https://arxiv.org/pdf/2406.16747
 
 Fine-tuning ideas:
 * Take LLaMA-3 70B Instruct-tuned output from each data chunk, and train the model to generate the same continuations (a way to skip fine-tuning?)

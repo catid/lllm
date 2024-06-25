@@ -35,6 +35,7 @@ from cpp_dataloader import DataLoader, DataVerifier, EpochConfig
 
 import schedulefree
 from adalomo import AdaLomo
+from adam_mini import Adam_mini
 
 from logger_tt import setup_logging, logger
 
@@ -96,6 +97,16 @@ def recreate_folder(folder_path):
         shutil.rmtree(folder_path)
     os.makedirs(folder_path)
 
+def remove_oldest_checkpoint(args):
+    checkpoint_files = [f for f in os.listdir(args.output_dir) if f.endswith('.pth')]
+    checkpoint_files.sort()
+    
+    if len(checkpoint_files) > args.max_checkpoints:
+        oldest_checkpoint = checkpoint_files[0]
+        oldest_checkpoint_path = os.path.join(args.output_dir, oldest_checkpoint)
+        os.remove(oldest_checkpoint_path)
+        logger.info(f"Removed oldest checkpoint: {oldest_checkpoint_path}")
+
 def save_checkpoint(args, model, optimizer, checkpoint_info):
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -115,6 +126,8 @@ def save_checkpoint(args, model, optimizer, checkpoint_info):
         yaml.dump(checkpoint_info, file, default_flow_style=False)
 
     logger.info(f"Checkpoint saved: {checkpoint_path}")
+
+    remove_oldest_checkpoint(args)
 
 def load_checkpoint(args, model, optimizer):
     try:
@@ -338,6 +351,15 @@ def main(args, shard_config):
             clip_grad_norm=1.0,
             clip_grad_value=4.0,
             weight_decay=args.weight_decay)
+    elif args.optimizer == "adam_mini":
+        optimizer = Adam_mini(
+            model.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+            zero_3=False,
+            n_embd=cfg.n_embd,
+            n_head=cfg.n_head,
+            n_query_groups=1) # 1=MQA
     else:
         raise ValueError(f"Unknown optimizer: {args.optimizer}")
 
@@ -441,7 +463,7 @@ def main(args, shard_config):
             total_steps += 1
             wallclock_time += step_time
 
-            if step % args.checkpoint_interval == 0:
+            if step % args.checkpoint_interval == 0 or step >= args.steps:
                 checkpoint_info = {
                     'train_version': 1,
                     'avg_train_loss': avg_train_loss,
@@ -454,14 +476,20 @@ def main(args, shard_config):
                     'lr': lr,
                 }
 
-                if args.wandb:
+                if args.wandb and is_main_process:
                     wandb.log(checkpoint_info)
 
                 save_checkpoint(args, model, optimizer, checkpoint_info)
 
-                #torch.cuda.empty_cache()
+                # Avoid fragmentation-related OOM by releasing cache
+                torch.cuda.empty_cache()
 
             #print_training_state_info(model, optimizer)
+
+            if step >= args.steps:
+                logger.info(f"Training complete.  Total steps: {total_steps}")
+                dist.barrier()
+                return
 
         # End of epoch
         logger.info(f"Epoch {epoch} complete on rank {args.global_rank}")
@@ -495,7 +523,7 @@ if __name__ == "__main__":
     parser.add_argument("--context", type=int, default=1026, help="Context size for each microbatch")
     parser.add_argument("--microbatch", type=int, default=16, help="Microbatch size")
     parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
-    parser.add_argument("--optimizer", type=str, default="schedulefree", help="Options: schedulefree, adalomo")
+    parser.add_argument("--optimizer", type=str, default="adam_mini", help="Options: schedulefree, adalomo, adam_mini")
     parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
@@ -506,6 +534,7 @@ if __name__ == "__main__":
 
     # Checkpointing
     parser.add_argument("--checkpoint-interval", type=int, default=100, help="Steps between checkpoints")
+    parser.add_argument("--max-checkpoints", type=int, default=20, help="Number of checkpoitns to keep on disk")
 
     # Distributed training
     parser.add_argument("--shard-strategy", type=str, default="NO_SHARD", choices=["FULL_SHARD", "SHARD_GRAD_OP", "NO_SHARD", "HYBRID_SHARD"], help="Sharding strategy for FSDP")
