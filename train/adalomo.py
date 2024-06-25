@@ -178,21 +178,23 @@ class AdaLomo(Optimizer):
                                 
                                 # Handle row dimension shape mismatch
                                 if update_mean_dim1.shape != self.exp_avg_sq_row[n].shape:
-                                    print(f"Shape mismatch for {n} in row dimension: {update_mean_dim1.shape} vs {self.exp_avg_sq_row[n].shape}")
+                                    #print(f"Shape mismatch for {n} in row dimension: {update_mean_dim1.shape} vs {self.exp_avg_sq_row[n].shape}")
                                     if update_mean_dim1.numel() == self.exp_avg_sq_row[n].numel():
                                         update_mean_dim1 = update_mean_dim1.view(self.exp_avg_sq_row[n].shape)
                                     else:
-                                        print(f"Cannot reshape update_mean_dim1 for {n}, skipping update for row dimension.")
-                                        continue  # Skip this parameter update if shape mismatch cannot be resolved
+                                        # Average to match dimensions
+                                        update_mean_dim1 = update.mean(dim=-1, keepdim=True).expand(self.exp_avg_sq_row[n].shape)
+                                        #print(f"Averaged update_mean_dim1 for {n} to shape: {update_mean_dim1.shape}")
 
                                 # Handle column dimension shape mismatch
                                 if update_mean_dim2.shape != self.exp_avg_sq_col[n].shape:
-                                    print(f"Shape mismatch for {n} in column dimension: {update_mean_dim2.shape} vs {self.exp_avg_sq_col[n].shape}")
+                                    #print(f"Shape mismatch for {n} in column dimension: {update_mean_dim2.shape} vs {self.exp_avg_sq_col[n].shape}")
                                     if update_mean_dim2.numel() == self.exp_avg_sq_col[n].numel():
                                         update_mean_dim2 = update_mean_dim2.view(self.exp_avg_sq_col[n].shape)
                                     else:
-                                        print(f"Cannot reshape update_mean_dim2 for {n}, skipping update for column dimension.")
-                                        continue  # Skip this parameter update if shape mismatch cannot be resolved
+                                        # Average to match dimensions
+                                        update_mean_dim2 = update.mean(dim=-2, keepdim=True).expand(self.exp_avg_sq_col[n].shape)
+                                        #print(f"Averaged update_mean_dim2 for {n} to shape: {update_mean_dim2.shape}")
 
                                 self.exp_avg_sq_row[n].mul_(beta2t).add_(
                                     update_mean_dim1, alpha=1.0 - beta2t
