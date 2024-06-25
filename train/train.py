@@ -496,12 +496,12 @@ if __name__ == "__main__":
     parser.add_argument("--microbatch", type=int, default=16, help="Microbatch size")
     parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
     parser.add_argument("--optimizer", type=str, default="schedulefree", help="Options: schedulefree, adalomo")
-    parser.add_argument("--lr", type=float, default=4e-3, help="Learning rate for training")
+    parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
-    parser.add_argument("--steps", type=int, default=1000000, help="Total steps for training")
-    parser.add_argument("--warmup", type=int, default=10, help="Warmup steps (recommended 2000 above 100k steps)")
-    parser.add_argument("--cooldown", type=int, default=200000, help="Cooldown steps (recommended 0.2x total steps)")
+    parser.add_argument("--steps", type=int, default=160000, help="Total steps for training")
+    parser.add_argument("--warmup", type=int, default=100, help="Warmup steps (recommended 2000 above 100k steps)")
+    parser.add_argument("--cooldown", type=int, default=32000, help="Cooldown steps (recommended 0.2x total steps)")
     parser.add_argument("--grad-clip", type=float, default=1.0, help="Maximum gradient magnitude")
 
     # Checkpointing
