@@ -7,6 +7,7 @@ pyyaml
 mamba_ssm
 logger_tt
 flash-attn
+bitsandbytes
 
 # Dataset dependencies
 build

@@ -7,6 +7,7 @@ from .srmsnorm import FastSimpleRMSNorm
 from mamba_ssm import Mamba2
 
 import math
+import bitsandbytes as bnb
 from dataclasses import dataclass
 
 @dataclass
@@ -27,6 +28,8 @@ class LatentLanguageConfig:
     d_conv: int = 4
     expand: int = 2
     headdim: int = 64
+
+    bnb_embedding: bool = False
 
 # activation functions
 
@@ -160,12 +163,12 @@ class Block(nn.Module):
                     expand=args.expand,
                     headdim=args.headdim)
         self.attn = MultiQueryAttentionDConv(args)
-        self.mlp = RWKV_CMix_x060(args, layer_id)
+        self.ffn = RWKV_CMix_x060(args, layer_id)
 
     def forward(self, x):
         x = x + self.mamba(self.ln(x))
         x = x + self.attn(self.ln(x))
-        x = x + self.mlp(self.ln(x))
+        x = x + self.ffn(self.ln(x))
         return x
 
 # Predicts next two tokens
@@ -175,7 +178,10 @@ class LatentLanguage(nn.Module):
 
         self.args = args
 
-        self.embedding = nn.Embedding(args.n_vocab, args.n_embd)
+        if args.bnb_embedding:
+            self.embedding = bnb.nn.StableEmbedding(args.n_vocab, args.n_embd)
+        else:
+            self.embedding = nn.Embedding(args.n_vocab, args.n_embd)
 
         self.layers = nn.ModuleList()
 
@@ -192,6 +198,22 @@ class LatentLanguage(nn.Module):
         self.lm_head.weight = self.embedding.weight
 
         self.drop = nn.Dropout(args.dropout)
+
+    def override_config(self, mng):
+        #mng.override_config(self.pred1.time_shift, "optim_bits", 32)
+        mng.override_config(self.pred1.time_maa_k, "optim_bits", 32)
+        mng.override_config(self.pred1.time_maa_r, "optim_bits", 32)
+
+        #mng.override_config(self.pred2.time_shift, "optim_bits", 32)
+        mng.override_config(self.pred2.time_maa_k, "optim_bits", 32)
+        mng.override_config(self.pred2.time_maa_r, "optim_bits", 32)
+
+        for block in self.layers:
+            #mng.override_config(block.ffn.time_shift, "optim_bits", 32)
+            mng.override_config(block.ffn.time_maa_k, "optim_bits", 32)
+            mng.override_config(block.ffn.time_maa_r, "optim_bits", 32)
+
+            mng.override_config(block.mamba.A_log, "optim_bits", 32)
 
     def forward(self, x, targets_1, targets_2):
         B, N = x.size()

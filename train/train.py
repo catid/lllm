@@ -36,6 +36,7 @@ from cpp_dataloader import DataLoader, DataVerifier, EpochConfig
 import schedulefree
 from adalomo import AdaLomo
 from adam_mini import Adam_mini
+import bitsandbytes as bnb
 
 from logger_tt import setup_logging, logger
 
@@ -193,8 +194,10 @@ def train_one_step(args, optimizer, model, dataloader):
     else:
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
 
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+        # Schedulefree optimizer does not support lr scheduling
+        if args.optimizer != "schedulefree":
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
 
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
@@ -335,9 +338,14 @@ def main(args, shard_config):
     cfg.padding_token = shard_config["n_vocab"] # Use largest token value as padding token
 
     cfg.block_size = args.context
-    model = LatentLanguage(cfg).to(device).to(torch.bfloat16)
+    cfg.bnb_embedding = (args.optimizer == "adamw8bit")
 
-    model = setup_fsdp(args, model)
+    # Register model parameters with bitsandbytes before copying to GPU
+    mng = bnb.optim.GlobalOptimManager.get_instance()
+    model = LatentLanguage(cfg)
+    mng.register_parameters(model.parameters())
+
+    model = model.to(device).to(torch.bfloat16)
 
     if args.optimizer == "schedulefree":
         optimizer = schedulefree.AdamWScheduleFree(
@@ -346,22 +354,41 @@ def main(args, shard_config):
             weight_decay=args.weight_decay)
     elif args.optimizer == "adalomo":
         optimizer = AdaLomo(
-            model.module,
+            model,
             lr=args.lr,
             clip_grad_norm=1.0,
             clip_grad_value=4.0,
             weight_decay=args.weight_decay)
     elif args.optimizer == "adam_mini":
         optimizer = Adam_mini(
-            model.parameters(),
+            model,
             lr=args.lr,
             weight_decay=args.weight_decay,
             zero_3=False,
             n_embd=cfg.n_embd,
             n_head=cfg.n_head,
             n_query_groups=1) # 1=MQA
+    elif args.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay)
+    elif args.optimizer == "adamw8bit":
+        optimizer = bnb.optim.AdamW8bit(
+            model.parameters(),
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+            amsgrad=False,
+            optim_bits=32,
+            min_8bit_size=16384,
+            percentile_clipping=100,
+            block_wise=True,
+            is_paged=False)
+        model.override_config(mng)
     else:
         raise ValueError(f"Unknown optimizer: {args.optimizer}")
+
+    model = setup_fsdp(args, model)
 
     params = count_parameters(model)
     if is_main_process:
@@ -523,7 +550,7 @@ if __name__ == "__main__":
     parser.add_argument("--context", type=int, default=1026, help="Context size for each microbatch")
     parser.add_argument("--microbatch", type=int, default=16, help="Microbatch size")
     parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
-    parser.add_argument("--optimizer", type=str, default="adam_mini", help="Options: schedulefree, adalomo, adam_mini")
+    parser.add_argument("--optimizer", type=str, default="adamw8bit", help="Options: schedulefree, adalomo, adam_mini, adamw8bit, adamw")
     parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
