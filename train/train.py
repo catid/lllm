@@ -142,6 +142,9 @@ def train_one_step(args, optimizer, model, dataloader):
     sum_tokens = torch.tensor(0, device=device)
     sum_correct = torch.tensor(0, device=device)
 
+    if args.optimizer == "adalomo" and args.grad_accum != 1:
+        raise ValueError(f"AdaLOMO does not support gradient accumulation")
+
     # FIXME: Run parallel sums to reduce memory usage for grad_accum
     for grad_accum_step in range(args.grad_accum):
         batch, is_cont, step, total_steps = dataloader.get_micro_batch()
@@ -164,18 +167,24 @@ def train_one_step(args, optimizer, model, dataloader):
         predictions = torch.argmax(logits, dim=-1)
         sum_correct += torch.sum((predictions == targets_1) & (targets_1 != -1))
 
-        if args.shard_strategy == "NO_SHARD":
-            model.require_backward_grad_sync = (grad_accum_step + 1 >= args.grad_accum)
-        loss.backward()
-
-    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+        if args.optimizer != "adalomo":
+            if args.shard_strategy == "NO_SHARD":
+                model.require_backward_grad_sync = (grad_accum_step + 1 >= args.grad_accum)
+            loss.backward()
 
     lr = get_lr(args, step)
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
 
-    optimizer.step()
-    optimizer.zero_grad(set_to_none=True)
+    if args.optimizer == "adalomo":
+        optimizer.grad_norm(loss)
+        optimizer.fused_backward(loss, lr)
+    else:
+        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
 
     # Sync statistics between ranks
     dist.all_reduce(tensor=sum_loss, op=dist.ReduceOp.AVG)
