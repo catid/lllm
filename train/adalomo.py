@@ -81,21 +81,20 @@ class AdaLomo(Optimizer):
         self.exp_avg_sq = {}
         self.exp_avg_sq_row = {}
         self.exp_avg_sq_col = {}
+        self.exp_avg_sq_third = {}
 
         # register hook function, which will be called through the backward process
         for n, p in self.model.named_parameters():
-            if self.zero3_enabled:
-                if len(p.ds_shape) == 1:
-                    self.exp_avg_sq[n] = torch.zeros(p.ds_shape[0], dtype=torch.float32).cuda()
-                else:
-                    self.exp_avg_sq_row[n] = torch.zeros(p.ds_shape[0], dtype=torch.float32).cuda()
-                    self.exp_avg_sq_col[n] = torch.zeros(p.ds_shape[1], dtype=torch.float32).cuda()
+            shape = p.ds_shape if self.zero3_enabled else p.data.shape
+            if len(shape) > 2:
+                self.exp_avg_sq_third[n] = torch.zeros(shape[1], shape[2], dtype=torch.float32).cuda()
+                self.exp_avg_sq_row[n] = torch.zeros(shape[0], shape[1], dtype=torch.float32).cuda()
+                self.exp_avg_sq_col[n] = torch.zeros(shape[0], shape[2], dtype=torch.float32).cuda()
+            elif len(shape) > 1:
+                self.exp_avg_sq_row[n] = torch.zeros(shape[0], dtype=torch.float32).cuda()
+                self.exp_avg_sq_col[n] = torch.zeros(shape[1], dtype=torch.float32).cuda()
             else:
-                if len(p.data.shape) == 1:
-                    self.exp_avg_sq[n] = torch.zeros(p.data.shape[0], dtype=torch.float32).cuda()
-                else:
-                    self.exp_avg_sq_row[n] = torch.zeros(p.data.shape[0], dtype=torch.float32).cuda()
-                    self.exp_avg_sq_col[n] = torch.zeros(p.data.shape[1], dtype=torch.float32).cuda()
+                self.exp_avg_sq[n] = torch.zeros(shape[0], dtype=torch.float32).cuda()
 
             if p.requires_grad:
                 p.register_hook(self.grad_func)
@@ -119,6 +118,26 @@ class AdaLomo(Optimizer):
         )
         c_factor = exp_avg_sq_col.unsqueeze(-2).rsqrt()
         return torch.mul(r_factor, c_factor)
+
+    @staticmethod
+    def _approx_sq_grad3(exp_avg_sq_x, exp_avg_sq_y, exp_avg_sq_z):
+        x_factor = (
+            (exp_avg_sq_x / exp_avg_sq_x.mean(dim=(0, 1), keepdim=True))
+            .rsqrt_()
+            .unsqueeze(2)
+        )
+        y_factor = (
+            (exp_avg_sq_y / exp_avg_sq_y.mean(dim=(0, 1), keepdim=True))
+            .rsqrt_()
+            .unsqueeze(1)
+        )
+        z_factor = (
+            (exp_avg_sq_z / exp_avg_sq_z.mean(dim=(0, 1), keepdim=True))
+            .rsqrt_()
+            .unsqueeze(0)
+        )
+
+        return torch.mul(torch.mul(x_factor, y_factor), z_factor)
 
     @staticmethod
     def _rms(tensor):
@@ -172,35 +191,26 @@ class AdaLomo(Optimizer):
                             beta2t = 1.0 - math.pow(self.step_num, decay_rate)
                             update = (grad_fp32**2) + self.eps[0]
 
-                            if len(p.data.shape) > 1:
-                                update_mean_dim1 = update.mean(dim=-1)
-                                update_mean_dim2 = update.mean(dim=-2)
-                                
-                                # Handle row dimension shape mismatch
-                                if update_mean_dim1.shape != self.exp_avg_sq_row[n].shape:
-                                    print(f"update.shape = {update.shape} p.data.shape = {p.data.shape} Shape mismatch for {n} in row dimension: {update_mean_dim1.shape} vs {self.exp_avg_sq_row[n].shape}")
-                                    if update_mean_dim1.numel() == self.exp_avg_sq_row[n].numel():
-                                        update_mean_dim1 = update_mean_dim1.view(self.exp_avg_sq_row[n].shape)
-                                    else:
-                                        # Repeat to match dimensions
-                                        update_mean_dim1 = update_mean_dim1.mean(dim=-1, keepdim=True).repeat(self.exp_avg_sq_row[n].shape)
-                                        print(f"Repeated update_mean_dim1 for {n} to shape: {update_mean_dim1.shape}")
-
-                                # Handle column dimension shape mismatch
-                                if update_mean_dim2.shape != self.exp_avg_sq_col[n].shape:
-                                    print(f"update.shape = {update.shape} p.data.shape = {p.data.shape} Shape mismatch for {n} in column dimension: {update_mean_dim2.shape} vs {self.exp_avg_sq_col[n].shape}")
-                                    if update_mean_dim2.numel() == self.exp_avg_sq_col[n].numel():
-                                        update_mean_dim2 = update_mean_dim2.view(self.exp_avg_sq_col[n].shape)
-                                    else:
-                                        # Average to match dimensions
-                                        update_mean_dim2 = update_mean_dim2.mean(dim=-2, keepdim=True).squeeze().unsqueeze(0).repeat(self.exp_avg_sq_col[n].shape)
-                                        print(f"Repeated update_mean_dim2 for {n} to shape: {update_mean_dim2.shape}")
-
+                            if len(p.data.shape) > 2:
                                 self.exp_avg_sq_row[n].mul_(beta2t).add_(
-                                    update_mean_dim1, alpha=1.0 - beta2t
+                                    update.mean(dim=-1), alpha=1.0 - beta2t
                                 )
                                 self.exp_avg_sq_col[n].mul_(beta2t).add_(
-                                    update_mean_dim2, alpha=1.0 - beta2t
+                                    update.mean(dim=-2), alpha=1.0 - beta2t
+                                )
+                                self.exp_avg_sq_third[n].mul_(beta2t).add_(
+                                    update.mean(dim=-3), alpha=1.0 - beta2t
+                                )
+                                update = self._approx_sq_grad3(
+                                    self.exp_avg_sq_row[n], self.exp_avg_sq_col[n], self.exp_avg_sq_third[n]
+                                )
+                                update.mul_(grad_fp32)
+                            elif len(p.data.shape) > 1:
+                                self.exp_avg_sq_row[n].mul_(beta2t).add_(
+                                    update.mean(dim=-1), alpha=1.0 - beta2t
+                                )
+                                self.exp_avg_sq_col[n].mul_(beta2t).add_(
+                                    update.mean(dim=-2), alpha=1.0 - beta2t
                                 )
                                 update = self._approx_sq_grad(
                                     self.exp_avg_sq_row[n], self.exp_avg_sq_col[n]
@@ -282,7 +292,21 @@ class AdaLomo(Optimizer):
                             beta2t = 1.0 - math.pow(self.step_num, decay_rate)
                             update = (grad_fp32**2) + self.eps[0]  # Change to addcmul_
 
-                            if len(p.ds_shape) > 1:
+                            if len(p.ds_shape) > 2:
+                                self.exp_avg_sq_row[n].mul_(beta2t).add_(
+                                    update.mean(dim=-1), alpha=1.0 - beta2t
+                                )
+                                self.exp_avg_sq_col[n].mul_(beta2t).add_(
+                                    update.mean(dim=-2), alpha=1.0 - beta2t
+                                )
+                                self.exp_avg_sq_third[n].mul_(beta2t).add_(
+                                    update.mean(dim=-3), alpha=1.0 - beta2t
+                                )
+                                update = self._approx_sq_grad3(
+                                    self.exp_avg_sq_row[n], self.exp_avg_sq_col[n], self.exp_avg_sq_third[n]
+                                )
+                                update.mul_(grad_fp32)
+                            elif len(p.ds_shape) > 1:
                                 self.exp_avg_sq_row[n].mul_(beta2t).add_(
                                     update.mean(dim=-1), alpha=1.0 - beta2t
                                 )

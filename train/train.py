@@ -492,11 +492,11 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str, default="my_project", help="Collection of experiments on wandb")
 
     # Hyperparameters
-    parser.add_argument("--context", type=int, default=4098, help="Context size for each microbatch")
-    parser.add_argument("--microbatch", type=int, default=1, help="Microbatch size")
-    parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
+    parser.add_argument("--context", type=int, default=1026, help="Context size for each microbatch")
+    parser.add_argument("--microbatch", type=int, default=16, help="Microbatch size")
+    parser.add_argument("--grad-accum", type=int, default=2, help="Gradient accumulation steps")
     parser.add_argument("--optimizer", type=str, default="schedulefree", help="Options: schedulefree, adalomo")
-    parser.add_argument("--lr", type=float, default=4e-4, help="Learning rate for training")
+    parser.add_argument("--lr", type=float, default=4e-3, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
     parser.add_argument("--steps", type=int, default=1000000, help="Total steps for training")
