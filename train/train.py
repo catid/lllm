@@ -192,7 +192,7 @@ def train_one_step(args, optimizer, model, dataloader):
     dist.all_reduce(tensor=sum_correct, op=dist.ReduceOp.SUM)
 
     # Note: sum_loss is now average loss
-    return sum_loss.item(), sum_tokens.item(), sum_correct.item()
+    return sum_loss.item(), sum_tokens.item(), sum_correct.item(), lr
 
 # learning rate decay scheduler (linear warmup, constant LR, and 1-sqrt cooldown)
 # Following results from "Scaling Laws and Compute-Optimal Training Beyond Fixed Training Durations" https://arxiv.org/abs/2405.18392v1
@@ -333,7 +333,7 @@ def main(args, shard_config):
             weight_decay=args.weight_decay)
     elif args.optimizer == "adalomo":
         optimizer = AdaLomo(
-            model.parameters(),
+            model.module.parameters(),
             lr=args.lr,
             loss_scale=2 ** 10)
     else:
@@ -418,7 +418,7 @@ def main(args, shard_config):
         while True:
             start_time = time.time()
 
-            avg_train_loss, sum_tokens, sum_correct = train_one_step(
+            avg_train_loss, sum_tokens, sum_correct, lr = train_one_step(
                 args, optimizer, model, dataloader)
 
             if avg_train_loss is None:
@@ -449,7 +449,7 @@ def main(args, shard_config):
                     'step': step,
                     'tokens': tokens,
                     'wallclock_time': wallclock_time,
-                    'lr': optimizer.param_groups[0]['lr'],
+                    'lr': lr,
                 }
 
                 if args.wandb:
