@@ -88,12 +88,12 @@ class SpatialDepthWiseConvolution(nn.Module):
         # Permute to [B, heads, head_dim, seq_len]
         x = x.permute(0, 1, 3, 2)
         # Change the shape to [B * heads, head_dim, seq_len]
-        x = x.view(B * heads, head_dim, seq_len)
+        x = x.reshape(B * heads, head_dim, seq_len)
         x = self.conv(x)
         # Crop the right most kernel_size - 1 results since we padded both sides
         x = x[:, :, :-(self.kernel_size - 1)]
         # Reshape to [B, heads, head_dim, seq_len]
-        x = x.view(B, heads, head_dim, seq_len)
+        x = x.reshape(B, heads, head_dim, seq_len)
         # Permute to [B, heads, seq_len, head_dim]
         x = x.permute(0, 1, 3, 2)
         return x
