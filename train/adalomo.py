@@ -178,7 +178,7 @@ class AdaLomo(Optimizer):
                                 
                                 # Handle row dimension shape mismatch
                                 if update_mean_dim1.shape != self.exp_avg_sq_row[n].shape:
-                                    print(f"Shape mismatch for {n} in row dimension: {update_mean_dim1.shape} vs {self.exp_avg_sq_row[n].shape}")
+                                    print(f"update.shape = {update.shape} p.data.shape = {p.data.shape} Shape mismatch for {n} in row dimension: {update_mean_dim1.shape} vs {self.exp_avg_sq_row[n].shape}")
                                     if update_mean_dim1.numel() == self.exp_avg_sq_row[n].numel():
                                         update_mean_dim1 = update_mean_dim1.view(self.exp_avg_sq_row[n].shape)
                                     else:
@@ -188,7 +188,7 @@ class AdaLomo(Optimizer):
 
                                 # Handle column dimension shape mismatch
                                 if update_mean_dim2.shape != self.exp_avg_sq_col[n].shape:
-                                    print(f"Shape mismatch for {n} in column dimension: {update_mean_dim2.shape} vs {self.exp_avg_sq_col[n].shape}")
+                                    print(f"update.shape = {update.shape} p.data.shape = {p.data.shape} Shape mismatch for {n} in column dimension: {update_mean_dim2.shape} vs {self.exp_avg_sq_col[n].shape}")
                                     if update_mean_dim2.numel() == self.exp_avg_sq_col[n].numel():
                                         update_mean_dim2 = update_mean_dim2.view(self.exp_avg_sq_col[n].shape)
                                     else:
