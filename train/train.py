@@ -333,7 +333,7 @@ def main(args, shard_config):
             weight_decay=args.weight_decay)
     elif args.optimizer == "adalomo":
         optimizer = AdaLomo(
-            model.module.parameters(),
+            model.module,
             lr=args.lr,
             loss_scale=2 ** 10)
     else:
