@@ -182,9 +182,9 @@ class AdaLomo(Optimizer):
                                     if update_mean_dim1.numel() == self.exp_avg_sq_row[n].numel():
                                         update_mean_dim1 = update_mean_dim1.view(self.exp_avg_sq_row[n].shape)
                                     else:
-                                        # Average to match dimensions
-                                        update_mean_dim1 = update.mean(dim=-1, keepdim=True).squeeze().expand(self.exp_avg_sq_row[n].shape)
-                                        print(f"Averaged and expanded update_mean_dim1 for {n} to shape: {update_mean_dim1.shape}")
+                                        # Repeat to match dimensions
+                                        update_mean_dim1 = update_mean_dim1.mean(dim=-1, keepdim=True).repeat(self.exp_avg_sq_row[n].shape)
+                                        print(f"Repeated update_mean_dim1 for {n} to shape: {update_mean_dim1.shape}")
 
                                 # Handle column dimension shape mismatch
                                 if update_mean_dim2.shape != self.exp_avg_sq_col[n].shape:
@@ -192,9 +192,9 @@ class AdaLomo(Optimizer):
                                     if update_mean_dim2.numel() == self.exp_avg_sq_col[n].numel():
                                         update_mean_dim2 = update_mean_dim2.view(self.exp_avg_sq_col[n].shape)
                                     else:
-                                        # Average to match dimensions
-                                        update_mean_dim2 = update.mean(dim=-2, keepdim=True).squeeze().expand(self.exp_avg_sq_col[n].shape)
-                                        print(f"Averaged and expanded update_mean_dim2 for {n} to shape: {update_mean_dim2.shape}")
+                                        # Repeat to match dimensions
+                                        update_mean_dim2 = update_mean_dim2.mean(dim=-2, keepdim=True).repeat(self.exp_avg_sq_col[n].shape)
+                                        print(f"Repeated update_mean_dim2 for {n} to shape: {update_mean_dim2.shape}")
 
                                 self.exp_avg_sq_row[n].mul_(beta2t).add_(
                                     update_mean_dim1, alpha=1.0 - beta2t
