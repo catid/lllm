@@ -73,7 +73,6 @@ class AdaLomo(Optimizer):
 
         # check if zero3 is enabled
         self.zero3_enabled = is_deepspeed_zero3_enabled()
-        print(f"TEST: self.zero3_enabled = {self.zero3_enabled}")
         if self.zero3_enabled:  # zero3 is enabled
             self.grad_func = self.fuse_update_zero3()
         else:

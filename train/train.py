@@ -335,7 +335,9 @@ def main(args, shard_config):
         optimizer = AdaLomo(
             model.module,
             lr=args.lr,
-            loss_scale=2 ** 10)
+            clip_grad_norm=1.0,
+            clip_grad_value=4.0,
+            weight_decay=args.weight_decay)
     else:
         raise ValueError(f"Unknown optimizer: {args.optimizer}")
 
