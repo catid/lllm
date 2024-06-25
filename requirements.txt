@@ -6,7 +6,6 @@ tqdm
 pyyaml
 mamba_ssm
 logger_tt
-lomo-optim
 flash-attn
 
 # Dataset dependencies

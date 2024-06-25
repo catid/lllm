@@ -34,7 +34,7 @@ import wandb
 from cpp_dataloader import DataLoader, DataVerifier, EpochConfig
 
 import schedulefree
-from lomo_optim import AdaLomo
+from adalomo import AdaLomo
 
 from logger_tt import setup_logging, logger
 
