@@ -6,8 +6,11 @@ tqdm
 pyyaml
 mamba_ssm
 logger_tt
-lomo-optim
 flash-attn
+causal-conv1d
+
+lomo-optim
+accelerate
 
 # Dataset dependencies
 build
