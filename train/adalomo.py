@@ -173,6 +173,8 @@ class AdaLomo(Optimizer):
                             update = (grad_fp32**2) + self.eps[0]
 
                             if len(p.data.shape) > 1:
+                                print(f"Shape of self.exp_avg_sq_row[{n}]: {self.exp_avg_sq_row[n].shape}")
+                                print(f"Shape of update.mean(dim=-1): {update.mean(dim=-1).shape}")
                                 self.exp_avg_sq_row[n].mul_(beta2t).add_(
                                     update.mean(dim=-1), alpha=1.0 - beta2t
                                 )
