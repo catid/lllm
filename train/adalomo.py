@@ -192,8 +192,8 @@ class AdaLomo(Optimizer):
                                     if update_mean_dim2.numel() == self.exp_avg_sq_col[n].numel():
                                         update_mean_dim2 = update_mean_dim2.view(self.exp_avg_sq_col[n].shape)
                                     else:
-                                        # Repeat to match dimensions
-                                        update_mean_dim2 = update_mean_dim2.mean(dim=-2, keepdim=True).repeat(self.exp_avg_sq_col[n].shape)
+                                        # Average to match dimensions
+                                        update_mean_dim2 = update_mean_dim2.mean(dim=-2, keepdim=True).squeeze().unsqueeze(0).repeat(self.exp_avg_sq_col[n].shape)
                                         print(f"Repeated update_mean_dim2 for {n} to shape: {update_mean_dim2.shape}")
 
                                 self.exp_avg_sq_row[n].mul_(beta2t).add_(
