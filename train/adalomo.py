@@ -175,14 +175,16 @@ class AdaLomo(Optimizer):
                             if len(p.data.shape) > 1:
                                 update_mean_dim1 = update.mean(dim=-1)
                                 if update_mean_dim1.shape != self.exp_avg_sq_row[n].shape:
-                                    update_mean_dim1 = update_mean_dim1.squeeze()
+                                    print(f"Shape mismatch for {n}: {update_mean_dim1.shape} vs {self.exp_avg_sq_row[n].shape}")
+                                    update_mean_dim1 = update_mean_dim1.view(self.exp_avg_sq_row[n].shape)
                                 self.exp_avg_sq_row[n].mul_(beta2t).add_(
                                     update_mean_dim1, alpha=1.0 - beta2t
                                 )
                                 
                                 update_mean_dim2 = update.mean(dim=-2)
                                 if update_mean_dim2.shape != self.exp_avg_sq_col[n].shape:
-                                    update_mean_dim2 = update_mean_dim2.squeeze()
+                                    print(f"Shape mismatch for {n}: {update_mean_dim2.shape} vs {self.exp_avg_sq_col[n].shape}")
+                                    update_mean_dim2 = update_mean_dim2.view(self.exp_avg_sq_col[n].shape)
                                 self.exp_avg_sq_col[n].mul_(beta2t).add_(
                                     update_mean_dim2, alpha=1.0 - beta2t
                                 )
