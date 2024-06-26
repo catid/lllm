@@ -265,10 +265,14 @@ class LatentLanguage(nn.Module):
 
         x = self.drop(x)
 
-        for block in self.layers:
-            # Repeat each block twice
-            x = block(x)
-            x = block(x)
+        for i, block in enumerate(self.layers):
+            if i == 0 or i == len(self.layers) - 1:
+                # First and last layers: apply once
+                x = block(x)
+            else:
+                # Middle layers: repeat twice
+                x = block(x)
+                x = block(x)
             #x = checkpoint(block, x, use_reentrant=False)
 
         # Apply output prediction heads
