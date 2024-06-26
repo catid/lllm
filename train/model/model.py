@@ -266,6 +266,8 @@ class LatentLanguage(nn.Module):
         x = self.drop(x)
 
         for block in self.layers:
+            # Repeat each block twice
+            x = block(x)
             x = block(x)
             #x = checkpoint(block, x, use_reentrant=False)
 

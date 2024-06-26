@@ -131,8 +131,6 @@ def save_checkpoint(args, model, optimizer, checkpoint_info):
 
     logger.info(f"Checkpoint saved: {checkpoint_path}")
 
-    remove_oldest_checkpoint(args)
-
 def load_checkpoint(args, model, optimizer):
     try:
         yml_path = os.path.join(args.output_dir, "latest.yml")
@@ -518,6 +516,8 @@ def main(args, shard_config):
                     wandb.log(checkpoint_info)
 
                 save_checkpoint(args, model, optimizer, checkpoint_info)
+                if args.local_rank == 0:
+                    remove_oldest_checkpoint(args)
 
                 # Avoid fragmentation-related OOM by releasing cache
                 torch.cuda.empty_cache()

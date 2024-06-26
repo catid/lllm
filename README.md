@@ -62,3 +62,13 @@ Needs some fixes from master mamba branch
 
 Fine-tuning ideas:
 * Take LLaMA-3 70B Instruct-tuned output from each data chunk, and train the model to generate the same continuations (a way to skip fine-tuning?)
+
+Onion training:
+
+1) Start with a very small model that is: nn.Embed -> SambaBlock1 -> Quantized1 (8-bit) -> SambaBlock1 -> heads.  nn.Embed is taken from a pre-trained large model and is frozen.  SambaBlock1 blocks have shared parameters.  There is a FFN head that reproduces the input token ids with reconstruction loss.  There is a second FFN head that predicts the next token with cross-entropy loss.  And a third head that predicts the following token.
+(2) Train the model so that loss = reconstruction + next_token + second_next_token until it converges.
+(3) Freeze SambaBlock1.  Insert a new SambaBlock2:
+nn.Embed -> SambaBlock1 -> Quantized1 -> SambaBlock2 -> Quantized2 -> SambaBlock2 -> Quantized1 -> SambaBlock1 -> heads
+(4) Continue training until convergence.
+(5) Repeat with a third block, etc.
+The Quantized layer involves kind of an auto-encoder thing that you split in half when inserting more blocks in between
