@@ -21,7 +21,10 @@ Follow the instructions in the `dataset/` directory.
 Follow the instructions in the `train/` directory.
 
 
-# Ideas
+# TODO
+
+Training TODO:
+* Implement Async DiLoCo: https://arxiv.org/pdf/2401.09135v1
 
 Dataloader TODO:
 * Add support for returning the list of concatenated samples in flash_attn format
@@ -33,7 +36,6 @@ Dataloader future improvements:
 Training future experiments:
 * Meta-learning to try to estimate weight updates using larger batch sizes and more iterations from smaller batch sizes and single steps
 * Try optimi https://optimi.benjaminwarner.dev/
-* AdaLOMO
 
 FFN experiments:
 * Sharing FFN weights onion-style https://arxiv.org/abs/2104.06022
