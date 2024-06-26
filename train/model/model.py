@@ -10,6 +10,8 @@ import math
 import bitsandbytes as bnb
 from dataclasses import dataclass
 
+from torch.utils.checkpoint import checkpoint
+
 @dataclass
 class LatentLanguageConfig:
     n_vocab: int = 0 # Set to tokenizer n_vocab
@@ -171,6 +173,40 @@ class Block(nn.Module):
         x = x + self.ffn(self.ln(x))
         return x
 
+# https://github.com/huggingface/transformers/blob/c28d04e9e252a1a099944e325685f14d242ecdcd/src/transformers/models/gpt2/modeling_gpt2.py#L454
+def _init_weights(
+    module,
+    n_layer,
+    initializer_range=0.02,  # Now only used for embedding layer.
+    rescale_prenorm_residual=True,
+    n_residuals_per_layer=3, # Mamba2, MHA, FFN
+):
+    if isinstance(module, nn.Linear):
+        if module.bias is not None:
+            if not getattr(module.bias, "_no_reinit", False):
+                nn.init.zeros_(module.bias)
+    elif isinstance(module, nn.Embedding) or isinstance(module, bnb.nn.StableEmbedding):
+        nn.init.normal_(module.weight, std=initializer_range)
+    elif isinstance(module, MultiQueryAttentionDConv):
+        nn.init.orthogonal_(module.qkv.weight)
+
+    if rescale_prenorm_residual:
+        # Reinitialize selected weights subject to the OpenAI GPT-2 Paper Scheme:
+        #   > A modified initialization which accounts for the accumulation on the residual path with model depth. Scale
+        #   > the weights of residual layers at initialization by a factor of 1/√N where N is the # of residual layers.
+        #   >   -- GPT-2 :: https://openai.com/blog/better-language-models/
+        #
+        # Reference (Megatron-LM): https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/model/gpt_model.py
+        for name, p in module.named_parameters():
+            if name in ["out_proj.weight"]:
+                # Special Scaled Initialization --> There are 2 Layer Norms per Transformer Block
+                # Following Pytorch init, except scale by 1/sqrt(2 * n_layer)
+                # We need to reinit p since this code could be called multiple times
+                # Having just p *= scale would repeatedly scale it down
+                nn.init.kaiming_uniform_(p, a=math.sqrt(5))
+                with torch.no_grad():
+                    p /= math.sqrt(n_residuals_per_layer * n_layer)
+
 # Predicts next two tokens
 class LatentLanguage(nn.Module):
     def __init__(self, args):
@@ -199,21 +235,22 @@ class LatentLanguage(nn.Module):
 
         self.drop = nn.Dropout(args.dropout)
 
+        # Initialize weights
+        self.apply(lambda module: _init_weights(module, args.n_layer))
+
     def override_config(self, mng):
-        #mng.override_config(self.pred1.time_shift, "optim_bits", 32)
         mng.override_config(self.pred1.time_maa_k, "optim_bits", 32)
         mng.override_config(self.pred1.time_maa_r, "optim_bits", 32)
 
-        #mng.override_config(self.pred2.time_shift, "optim_bits", 32)
         mng.override_config(self.pred2.time_maa_k, "optim_bits", 32)
         mng.override_config(self.pred2.time_maa_r, "optim_bits", 32)
 
         for block in self.layers:
-            #mng.override_config(block.ffn.time_shift, "optim_bits", 32)
             mng.override_config(block.ffn.time_maa_k, "optim_bits", 32)
             mng.override_config(block.ffn.time_maa_r, "optim_bits", 32)
 
             mng.override_config(block.mamba.A_log, "optim_bits", 32)
+            mng.override_config(block.mamba.D, "optim_bits", 32)
 
     def forward(self, x, targets_1, targets_2):
         B, N = x.size()
@@ -224,15 +261,20 @@ class LatentLanguage(nn.Module):
         x = x.masked_fill(x == -1, self.args.padding_token)
 
         x = self.embedding(x)
+        #x = checkpoint(self.embedding, x, use_reentrant=False)
 
         x = self.drop(x)
 
         for block in self.layers:
             x = block(x)
+            #x = checkpoint(block, x, use_reentrant=False)
 
         # Apply output prediction heads
-        x1 = self.pred1(self.ln(x))
-        x2 = self.pred2(self.ln(x))
+        x = self.ln(x)
+        x1 = self.pred1(x)
+        x2 = self.pred2(x)
+        #x1 = checkpoint(self.pred1, x, use_reentrant=False)
+        #x2 = checkpoint(self.pred2, x, use_reentrant=False)
 
         # Use the same lm_head for both predictions
         logits_1 = self.lm_head(x1)

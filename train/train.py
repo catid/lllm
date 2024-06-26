@@ -8,6 +8,7 @@ import os, random, time, shutil, argparse, yaml, math, copy, sys
 from packaging import version
 
 import torch
+from torch import nn
 from torch.distributed.fsdp import (
     FullyShardedDataParallel,
     MixedPrecision,
@@ -39,6 +40,8 @@ from adam_mini import Adam_mini
 import bitsandbytes as bnb
 
 from logger_tt import setup_logging, logger
+
+from torch.profiler import profile, record_function, ProfilerActivity
 
 def get_current_script_directory():
     # Get the absolute path of the current script
@@ -259,6 +262,13 @@ def print_training_state_info(model, optimizer):
                     total_optimizer_size += value.numel() * value.element_size()
     print(f"Total optimizer state size: {total_optimizer_size} bytes")
 
+    allocated = torch.cuda.memory_allocated()
+    reserved = torch.cuda.memory_reserved()
+    print(f'Memory allocated: {allocated / 1024**2:.2f} MB')
+    print(f'Memory reserved: {reserved / 1024**2:.2f} MB')
+
+    print(torch.cuda.memory_summary())
+
 def setup_fsdp(args, model):
     # Note: torch.compile does not seem to improve performance
     if args.compile:
@@ -343,6 +353,7 @@ def main(args, shard_config):
     # Register model parameters with bitsandbytes before copying to GPU
     mng = bnb.optim.GlobalOptimManager.get_instance()
     model = LatentLanguage(cfg)
+
     mng.register_parameters(model.parameters())
 
     model = model.to(device).to(torch.bfloat16)
@@ -463,14 +474,14 @@ def main(args, shard_config):
         dataloader.begin_epoch(config)
 
         validation_config = copy.deepcopy(config)
-        validation_config.start_step = 0 # 
+        validation_config.start_step = 0
         validation_dataloader.begin_epoch(validation_config)
 
         while True:
             start_time = time.time()
 
             avg_train_loss, sum_tokens, sum_correct, lr = train_one_step(
-                args, optimizer, model, dataloader)
+                            args, optimizer, model, dataloader)
 
             if avg_train_loss is None:
                 logger.info(f"Epoch {epoch} data exhausted on global_rank={args.global_rank} at step={step}")
@@ -511,7 +522,8 @@ def main(args, shard_config):
                 # Avoid fragmentation-related OOM by releasing cache
                 torch.cuda.empty_cache()
 
-            #print_training_state_info(model, optimizer)
+            #if is_main_process:
+                #print_training_state_info(model, optimizer)
 
             if step >= args.steps:
                 logger.info(f"Training complete.  Total steps: {total_steps}")
@@ -547,9 +559,9 @@ if __name__ == "__main__":
     parser.add_argument("--project", type=str, default="my_project", help="Collection of experiments on wandb")
 
     # Hyperparameters
-    parser.add_argument("--context", type=int, default=1026, help="Context size for each microbatch")
-    parser.add_argument("--microbatch", type=int, default=16, help="Microbatch size")
-    parser.add_argument("--grad-accum", type=int, default=1, help="Gradient accumulation steps")
+    parser.add_argument("--context", type=int, default=2050, help="Context size for each microbatch")
+    parser.add_argument("--microbatch", type=int, default=6, help="Microbatch size")
+    parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
     parser.add_argument("--optimizer", type=str, default="adamw8bit", help="Options: schedulefree, adalomo, adam_mini, adamw8bit, adamw")
     parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
