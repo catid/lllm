@@ -25,7 +25,7 @@ class LatentLanguageConfig:
     dropout: float = 0.2
     n_head: int = 8
     n_layer: int = 8
-    window_size: int = (2048, 0)
+    window_size: int = (1024, 0)
 
     ffn_mult: int = 4
 
