@@ -17,8 +17,6 @@ class LatentLanguageConfig:
     n_vocab: int = 0 # Set to tokenizer n_vocab
     padding_token: int = 0
 
-    n_embd: int = 64
-
     d_model: int = 512
     bias: bool = False
     dropout: float = 0.2
