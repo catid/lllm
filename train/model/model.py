@@ -17,7 +17,10 @@ class LatentLanguageConfig:
     n_vocab: int = 0 # Set to tokenizer n_vocab
     padding_token: int = 0
 
-    n_embd: int = 512
+    n_embd: int = 64
+    commitment_cost: float = 0.25
+
+    d_model: int = 512
     bias: bool = False
     dropout: float = 0.2
     n_head: int = 8
@@ -43,23 +46,29 @@ class ReLUSquared(nn.Module):
 # FFN layer
 
 class RWKV_CMix_x060(nn.Module):
-    def __init__(self, args, layer_id):
+    def __init__(self, args, layer_id, d_in=None, d_out=None):
         super().__init__()
         self.args = args
         self.layer_id = layer_id
         self.time_shift = nn.ZeroPad2d((0, 0, 1, -1))
 
+        if d_in is None:
+            d_in = args.d_model
+        if d_out is None:
+            d_out = args.d_model
+        d_inner = d_in * args.ffn_mult
+
         with torch.no_grad():  # fancy init of time_mix
             ratio_1_to_almost0 = 1.0 - (layer_id / args.n_layer)  # 1 to ~0
-            ddd = torch.ones(1, 1, args.n_embd)
-            for i in range(args.n_embd):
-                ddd[0, 0, i] = i / args.n_embd
+            ddd = torch.ones(1, 1, d_in)
+            for i in range(d_in):
+                ddd[0, 0, i] = i / d_in
             self.time_maa_k = nn.Parameter(1.0 - torch.pow(ddd, ratio_1_to_almost0))
             self.time_maa_r = nn.Parameter(1.0 - torch.pow(ddd, ratio_1_to_almost0))
 
-        self.key = nn.Linear(args.n_embd, args.n_embd * args.ffn_mult, bias=False)
-        self.receptance = nn.Linear(args.n_embd, args.n_embd, bias=False)
-        self.value = nn.Linear(args.n_embd * args.ffn_mult, args.n_embd, bias=False)
+        self.key = nn.Linear(d_in, d_inner, bias=False)
+        self.receptance = nn.Linear(d_in, d_out, bias=False)
+        self.value = nn.Linear(d_inner, d_out, bias=False)
 
         self.act = ReLUSquared()
 
@@ -108,16 +117,16 @@ class SpatialDepthWiseConvolution(nn.Module):
 class MultiQueryAttentionDConv(nn.Module):
     def __init__(self, config):
         super().__init__()
-        assert config.n_embd % config.n_head == 0
-        self.head_dim = config.n_embd // config.n_head  # head dimension
+        assert config.d_model % config.n_head == 0
+        self.head_dim = config.d_model // config.n_head  # head dimension
         self.n_head = config.n_head
-        self.n_embd = config.n_embd
+        self.d_model = config.d_model
         self.dropout = config.dropout
         self.window_size = config.window_size if hasattr(config, 'window_size') else (-1, -1)
         # query projections for all heads, key and value projections for one head
-        self.qkv = nn.Linear(config.n_embd, config.n_embd + 2 * self.head_dim, bias=config.bias)
+        self.qkv = nn.Linear(config.d_model, config.d_model + 2 * self.head_dim, bias=config.bias)
         # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        self.c_proj = nn.Linear(config.d_model, config.d_model, bias=config.bias)
         # regularization
         self.resid_dropout = nn.Dropout(config.dropout)
         # causal depthwise convolutions for Q, K, and V
@@ -126,12 +135,12 @@ class MultiQueryAttentionDConv(nn.Module):
         self.v_conv = SpatialDepthWiseConvolution(self.head_dim)
 
     def forward(self, x, mask=None):
-        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (d_model)
 
         # calculate query for all heads, and key & value for a single head
         qkv = self.qkv(x)
-        q = qkv[..., :self.n_embd]
-        k = qkv[..., self.n_embd:self.n_embd + C // self.n_head]
+        q = qkv[..., :self.d_model]
+        k = qkv[..., self.d_model:self.d_model + C // self.n_head]
         v = qkv[..., -C // self.n_head:]
 
         # split query into multiple heads
@@ -157,9 +166,9 @@ class MultiQueryAttentionDConv(nn.Module):
 class Block(nn.Module):
     def __init__(self, args, layer_id):
         super().__init__()
-        self.ln = FastSimpleRMSNorm(args.n_embd)
+        self.ln = FastSimpleRMSNorm(args.d_model)
         self.mamba = Mamba2(
-                    d_model=args.n_embd,
+                    d_model=args.d_model,
                     d_state=args.d_state,
                     d_conv=args.d_conv,
                     expand=args.expand,
@@ -172,6 +181,30 @@ class Block(nn.Module):
         x = x + self.attn(self.ln(x))
         x = x + self.ffn(self.ln(x))
         return x
+
+class EmbeddingLayer(nn.Module):
+    def __init__(self, args):
+        super(EmbeddingLayer, self).__init__()
+        
+        self.n_vocab = args.n_vocab
+        self.n_embd = args.n_embd
+        self.d_model = args.d_model
+        self.commitment_cost = args.commitment_cost
+
+        if args.bnb_embedding:
+            self.embedding = bnb.nn.StableEmbedding(args.n_vocab, args.d_model)
+        else:
+            self.embedding = nn.Embedding(args.n_vocab, args.d_model)
+        self.lm_head = nn.Linear(args.d_model, args.n_vocab)
+
+        # Tie vocab weights
+        self.lm_head.weight = self.embedding.weight
+
+    def forward_encode(self, inputs):
+        return self.embedding(inputs)
+
+    def forward_decode(self, x):
+        return self.lm_head(x)
 
 # https://github.com/huggingface/transformers/blob/c28d04e9e252a1a099944e325685f14d242ecdcd/src/transformers/models/gpt2/modeling_gpt2.py#L454
 def _init_weights(
@@ -214,24 +247,16 @@ class LatentLanguage(nn.Module):
 
         self.args = args
 
-        if args.bnb_embedding:
-            self.embedding = bnb.nn.StableEmbedding(args.n_vocab, args.n_embd)
-        else:
-            self.embedding = nn.Embedding(args.n_vocab, args.n_embd)
+        self.embed = EmbeddingLayer(args)
 
         self.layers = nn.ModuleList()
 
         for layer_id in range(args.n_layer):
             self.layers.append(Block(args, layer_id))
 
-        self.ln = FastSimpleRMSNorm(args.n_embd)
+        self.ln = FastSimpleRMSNorm(args.d_model)
         self.pred1 = RWKV_CMix_x060(args, args.n_layer)
         self.pred2 = RWKV_CMix_x060(args, args.n_layer)
-
-        self.lm_head = nn.Linear(args.n_embd, args.n_vocab)
-
-        # Tie vocab weights
-        self.lm_head.weight = self.embedding.weight
 
         self.drop = nn.Dropout(args.dropout)
 
@@ -260,31 +285,31 @@ class LatentLanguage(nn.Module):
 
         x = x.masked_fill(x == -1, self.args.padding_token)
 
-        x = self.embedding(x)
-        #x = checkpoint(self.embedding, x, use_reentrant=False)
+        x = self.embed.forward_encode(x)
 
         x = self.drop(x)
 
-        for i, block in enumerate(self.layers):
-            if i == 0 or i == len(self.layers) - 1:
-                # First and last layers: apply once
-                x = block(x)
-            else:
-                # Middle layers: repeat twice
-                x = block(x)
-                x = block(x)
-            #x = checkpoint(block, x, use_reentrant=False)
+        num_layers = len(self.layers)
+
+        # Apply layers in [0, 1, 2, 3, 4, 4, 3, 2, 1, 5] order (for L=6)
+        layer_order = (
+            list(range(num_layers - 1)) +  # Forward pass excluding last layer
+            list(range(num_layers - 2, 0, -1)) +  # Backward pass excluding first and last layer
+            [num_layers - 1]  # Last layer
+        )
+
+        for i in layer_order:
+            x = self.layers[i](x)
+            #x = checkpoint(self.layers[i], x, use_reentrant=False)
 
         # Apply output prediction heads
         x = self.ln(x)
         x1 = self.pred1(x)
         x2 = self.pred2(x)
-        #x1 = checkpoint(self.pred1, x, use_reentrant=False)
-        #x2 = checkpoint(self.pred2, x, use_reentrant=False)
 
         # Use the same lm_head for both predictions
-        logits_1 = self.lm_head(x1)
-        logits_2 = self.lm_head(x2)
+        logits_1 = self.embed.forward_decode(x1)
+        logits_2 = self.embed.forward_decode(x2)
 
         # Calculate losses using provided targets
         loss_1 = F.cross_entropy(

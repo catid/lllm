@@ -1,5 +1,4 @@
 # TODO:
-# * Get FSDP training working
 # * Periodically print validation loss / example output
 # * 1.5M tokens/second training is the benchmark to beat
 # * Use [Eluether harness to eval model](https://github.com/EleutherAI/lm-evaluation-harness)
@@ -9,22 +8,12 @@ from packaging import version
 
 import torch
 from torch import nn
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel,
-    MixedPrecision,
-    BackwardPrefetch,
-    ShardingStrategy,
-    FullStateDictConfig,
-    StateDictType,
-)
-from torch.distributed.fsdp.wrap import (
-    transformer_auto_wrap_policy,
-    enable_wrap,
-    wrap,
-)
-import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel
 from functools import partial
+
+import deepspeed
+from deepspeed import comm
+from deepspeed import log_dist
+from deepspeed.runtime.config import DeepSpeedConfig
 
 from model.model import LatentLanguage, LatentLanguageConfig, MultiQueryAttentionDConv
 
@@ -39,20 +28,12 @@ from adalomo import AdaLomo
 from adam_mini import Adam_mini
 import bitsandbytes as bnb
 
-from logger_tt import setup_logging, logger
-
-from torch.profiler import profile, record_function, ProfilerActivity
-
 def get_current_script_directory():
     # Get the absolute path of the current script
     script_path = os.path.abspath(sys.argv[0])
     # Get the directory name from the script path
     script_dir = os.path.dirname(script_path)
     return script_dir
-
-setup_logging(
-    use_multiprocessing="fork",
-    log_path=os.path.join(get_current_script_directory(), "train.log"))
 
 # Enable cuDNN benchmarking to improve online performance
 torch.backends.cudnn.benchmark = True
@@ -61,7 +42,14 @@ torch.backends.cudnn.benchmark = True
 torch.autograd.profiler.emit_nvtx(False)
 torch.autograd.profiler.profile(False)
 
-is_main_process = False
+# Deepspeed logging functions
+def log_0(msg):
+    log_dist(msg, ranks=[0])
+def log_all(msg):
+    log_dist(msg, ranks=[-1])
+
+def is_main_process():
+    return comm.get_rank() == 0
 
 def round_up_to_next_multiple_of_128(x):
     if x % 128 == 0:
@@ -85,7 +73,7 @@ def synchronize_seed(args):
     else:
         seed_tensor = torch.zeros(1, dtype=torch.long, device=device)  # A tensor to receive the value
 
-    dist.broadcast(tensor=seed_tensor, src=0)
+    comm.broadcast(tensor=seed_tensor, src=0)
 
     # Seed PRNGs using the shared seed
     seed = int(seed_tensor.item())
@@ -93,7 +81,7 @@ def synchronize_seed(args):
     np.random.seed(seed)
     random.seed(seed)
 
-    logger.info(f"Using seed: {seed} for shard_id={args.global_rank}")
+    log_all(f"Using seed: {seed} for global_rank={args.global_rank}")
     return seed
 
 def recreate_folder(folder_path):
@@ -109,15 +97,29 @@ def remove_oldest_checkpoint(args):
         oldest_checkpoint = checkpoint_files[0]
         oldest_checkpoint_path = os.path.join(args.output_dir, oldest_checkpoint)
         os.remove(oldest_checkpoint_path)
-        logger.info(f"Removed oldest checkpoint: {oldest_checkpoint_path}")
+        log_all(f"Removed oldest checkpoint: {oldest_checkpoint_path}")
 
-def save_checkpoint(args, model, optimizer, checkpoint_info):
+def save_checkpoint(model_engine, args):
+    # Write output .pth file
+    saved_state_dict = model_engine.state_dict()
+
+    # Remove module. prefix from keys
+    fixed_state_dict = {key.replace("module.", ""): value for key, value in saved_state_dict.items()}
+
+    # Add our data to the state dict to facilitate the evaluation script
+    fixed_state_dict['lllm'] = {
+        'fp16': fp16,
+    }
+
+    torch.save(fixed_state_dict, args.output_model)
+
+def save_checkpoint(args, model_engine, optimizer, checkpoint_info):
     os.makedirs(args.output_dir, exist_ok=True)
 
     filename = f"checkpoint_epoch_{checkpoint_info['epoch']}_step_{checkpoint_info['step']}.pth"
     checkpoint_path = os.path.join(args.output_dir, filename)
     checkpoint = {
-        'model_state_dict': model.state_dict(),
+        'model_state_dict': model_engine.module.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
         'info': checkpoint_info
     }
@@ -129,9 +131,9 @@ def save_checkpoint(args, model, optimizer, checkpoint_info):
     with open(yml_path, 'w') as file:
         yaml.dump(checkpoint_info, file, default_flow_style=False)
 
-    logger.info(f"Checkpoint saved: {checkpoint_path}")
+    log_all(f"Checkpoint saved: {checkpoint_path}")
 
-def load_checkpoint(args, model, optimizer):
+def load_checkpoint(args, model_engine, optimizer):
     try:
         yml_path = os.path.join(args.output_dir, "latest.yml")
         with open(yml_path, 'r') as file:
@@ -139,11 +141,11 @@ def load_checkpoint(args, model, optimizer):
         checkpoint_path = checkpoint_info["checkpoint_path"]
 
         checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        model_engine.module.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         checkpoint_info = checkpoint['info']
     except Exception as e:
-        logger.info(f"Error loading checkpoint: {e}")
+        log_all(f"Error loading checkpoint: {e}")
         return None
     return checkpoint_info
 
