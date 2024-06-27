@@ -18,7 +18,6 @@ class LatentLanguageConfig:
     padding_token: int = 0
 
     n_embd: int = 64
-    commitment_cost: float = 0.25
 
     d_model: int = 512
     bias: bool = False
@@ -185,11 +184,6 @@ class Block(nn.Module):
 class EmbeddingLayer(nn.Module):
     def __init__(self, args):
         super(EmbeddingLayer, self).__init__()
-        
-        self.n_vocab = args.n_vocab
-        self.n_embd = args.n_embd
-        self.d_model = args.d_model
-        self.commitment_cost = args.commitment_cost
 
         if args.bnb_embedding:
             self.embedding = bnb.nn.StableEmbedding(args.n_vocab, args.d_model)
