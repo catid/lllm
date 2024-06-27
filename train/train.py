@@ -147,7 +147,7 @@ def load_checkpoint(args, model, optimizer):
         return None
     return checkpoint_info
 
-def train_one_step(args, optimizer, model, dataloader):
+def train_one_step(args, optimizer, model, dataloader, step):
     device = torch.device("cuda")
 
     model.train()
@@ -162,7 +162,7 @@ def train_one_step(args, optimizer, model, dataloader):
 
     # FIXME: Run parallel sums to reduce memory usage for grad_accum
     for grad_accum_step in range(args.grad_accum):
-        batch, is_cont, step, total_steps = dataloader.get_micro_batch()
+        batch, is_cont, data_step, total_steps = dataloader.get_micro_batch()
 
         if batch is None:
             return None, None
@@ -209,7 +209,7 @@ def train_one_step(args, optimizer, model, dataloader):
     dist.all_reduce(tensor=sum_correct, op=dist.ReduceOp.SUM)
 
     # Note: sum_loss is now average loss
-    return sum_loss.item(), sum_tokens.item(), sum_correct.item(), lr
+    return sum_loss.item(), sum_tokens.item(), sum_correct.item(), lr, data_step
 
 # learning rate decay scheduler (linear warmup, constant LR, and 1-sqrt cooldown)
 # Following results from "Scaling Laws and Compute-Optimal Training Beyond Fixed Training Durations" https://arxiv.org/abs/2405.18392v1
@@ -427,7 +427,7 @@ def main(args, shard_config):
         wandb.init(project=args.project, name=args.name, config=args)
         wandb.run.log_code = False
 
-    step = 0
+    start_step = 0
     epoch = 0
     tokens = 0
     total_steps = 0
@@ -436,12 +436,12 @@ def main(args, shard_config):
     if args.resume:
         checkpoint_info = load_checkpoint(args, model, optimizer)
         if checkpoint_info is not None:
-            step = checkpoint_info.get("step", 0)
+            start_step = checkpoint_info.get("start_step", 0)
             epoch = checkpoint_info.get("epoch", 0)
             total_steps = checkpoint_info.get("total_steps", 0)
             tokens = checkpoint_info.get("tokens", 0)
             wallclock_time = checkpoint_info.get("wallclock_time", 0.0)
-            logger.info(f"Loaded checkpoint at step={step} epoch={epoch}")
+            logger.info(f"Loaded checkpoint at start_step={start_step} epoch={epoch}")
         else:
             logger.info("No checkpoint found - Starting training from scratch")
     else:
@@ -468,7 +468,7 @@ def main(args, shard_config):
         config.micro_batch_size = args.microbatch
         config.context_size = args.context
         config.min_data_length = args.min_data_length
-        config.start_step = step
+        config.start_step = start_step
         dataloader.begin_epoch(config)
 
         validation_config = copy.deepcopy(config)
@@ -478,8 +478,8 @@ def main(args, shard_config):
         while True:
             start_time = time.time()
 
-            avg_train_loss, sum_tokens, sum_correct, lr = train_one_step(
-                            args, optimizer, model, dataloader)
+            avg_train_loss, sum_tokens, sum_correct, lr, data_step = train_one_step(
+                            args, optimizer, model, dataloader, total_steps)
 
             if avg_train_loss is None:
                 logger.info(f"Epoch {epoch} data exhausted on global_rank={args.global_rank} at step={step}")
@@ -493,20 +493,20 @@ def main(args, shard_config):
             correct_pct = sum_correct * 100.0 / sum_tokens
 
             if is_main_process:
-                logger.info(f"Step {step}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec correct={correct_pct:.2f}% Tokens={tokens/1000000.0:.2f}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
+                logger.info(f"Step {total_steps}: AvgLoss={avg_train_loss:.4f} StepTime={step_time:.2f} sec correct={correct_pct:.2f}% Tokens={tokens/1000000.0:.2f}M at {tokens_per_second/1000.0:.2f} ktokens/sec") 
 
-            step += 1
+            start_step = data_step + 1
             total_steps += 1
             wallclock_time += step_time
 
-            if step % args.checkpoint_interval == 0 or step >= args.steps:
+            if total_steps % args.checkpoint_interval == 0 or total_steps >= args.steps:
                 checkpoint_info = {
                     'train_version': 1,
                     'avg_train_loss': avg_train_loss,
                     'args': vars(args),
                     'total_steps': total_steps,
                     'epoch': epoch,
-                    'step': step,
+                    'start_step': start_step,
                     'tokens': tokens,
                     'wallclock_time': wallclock_time,
                     'lr': lr,
@@ -525,7 +525,7 @@ def main(args, shard_config):
             #if is_main_process:
                 #print_training_state_info(model, optimizer)
 
-            if step >= args.steps:
+            if total_steps >= args.steps:
                 logger.info(f"Training complete.  Total steps: {total_steps}")
                 dist.barrier()
                 return
@@ -533,7 +533,7 @@ def main(args, shard_config):
         # End of epoch
         logger.info(f"Epoch {epoch} complete on rank {args.global_rank}")
         epoch += 1
-        step = 0
+        start_step = 0
         dist.barrier()
 
     logger.info(f"Training complete.  Total steps: {total_steps}")
