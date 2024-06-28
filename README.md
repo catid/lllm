@@ -18,6 +18,16 @@ Follow the instructions in the `dataset/` directory.
 
 ## (3) Training
 
+```bash
+conda create -n lllm python=3.10 -y
+conda activate lllm
+pip install packaging torch==2.3.1 torchvision torchaudio
+pip install mamba_ssm
+pip install causal-conv1d
+pip install flash-attn
+pip install -r requirements.txt
+```
+
 Follow the instructions in the `train/` directory.
 
 

@@ -114,7 +114,7 @@ def remove_oldest_checkpoint(args):
 def save_checkpoint(args, model, optimizer, checkpoint_info):
     os.makedirs(args.output_dir, exist_ok=True)
 
-    filename = f"checkpoint_epoch_{checkpoint_info['epoch']}_step_{checkpoint_info['step']}.pth"
+    filename = f"checkpoint_epoch_{checkpoint_info['epoch']}_step_{checkpoint_info['start_step']}.pth"
     checkpoint_path = os.path.join(args.output_dir, filename)
     checkpoint = {
         'model_state_dict': model.state_dict(),

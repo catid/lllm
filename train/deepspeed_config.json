@@ -1,0 +1,39 @@
+{
+    "_read_the_docs": "https://www.deepspeed.ai/docs/config-json/",
+  
+    "train_micro_batch_size_per_gpu": 16,
+    "gradient_accumulation_steps": 4,
+
+    "gradient_clipping": 5.0,
+    "prescale_gradients": true,
+
+    "steps_per_print": 100,
+    "wall_clock_breakdown": false,
+    "comms_logger": {
+      "enabled": true,
+      "verbose": false,
+      "prof_all": false,
+      "debug": false
+    },
+
+    "tensorboard": {
+      "enabled": false,
+      "output_path": "logs",
+      "job_name": "lllm_job"
+    },
+    "bf16": {
+        "enabled": true
+    },
+    "zero_optimization": {
+      "stage": 0,
+      "allgather_partitions": true,
+      "allgather_bucket_size": 2e8,
+      "overlap_comm": true,
+      "reduce_scatter": true,
+      "reduce_bucket_size": 2e8,
+      "contiguous_gradients": true
+    },
+    "checkpoint": {
+      "use_node_local_storage": true
+    }
+}

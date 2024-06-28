@@ -60,7 +60,7 @@ bool test_data_loader() {
         //LOG_INFO() << "Sample data: " << output_batch[0] << " (continuation=" << (int)is_continuation[0] << ")";
 
         std::ostringstream oss;
-        for (int i = 0; i < num_tokens; ++i) {
+        for (uint32_t i = 0; i < num_tokens; ++i) {
             if (output_batch[i] > 0) {
                 oss << "D";
             } else if (output_batch[i] == 0) {

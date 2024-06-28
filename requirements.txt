@@ -1,25 +1,25 @@
 # Community projects
-numpy==1.26.4
+numpy
 einops
 pytest
 tqdm
 pyyaml
-mamba_ssm
 logger_tt
-flash-attn
-bitsandbytes
 
 # Dataset dependencies
 build
 git-python
 pyarrow
 
-# Meta products
-schedulefree
-
 # Microsoft products
 mpi4py
 deepspeed
+
+# Community products
+bitsandbytes
+
+# Meta products
+schedulefree
 
 # OpenAI products
 tiktoken
