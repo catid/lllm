@@ -27,7 +27,7 @@ pip install mamba_ssm
 pip install causal-conv1d
 pip install flash-attn
 pip install -r requirements.txt
-pip install cupy
+#pip install cupy (only for 1-bit LAMB)
 ```
 
 Follow the instructions in the `train/` directory.
