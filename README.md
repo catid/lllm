@@ -21,6 +21,7 @@ Follow the instructions in the `dataset/` directory.
 ```bash
 conda create -n lllm python=3.10 -y
 conda activate lllm
+pip install "numpy<2.0"
 pip install packaging torch==2.3.1 torchvision torchaudio
 pip install mamba_ssm
 pip install causal-conv1d

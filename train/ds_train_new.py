@@ -28,6 +28,9 @@ from torch.profiler import profile, record_function, ProfilerActivity
 
 import schedulefree
 
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
+
 def get_current_script_directory():
     # Get the absolute path of the current script
     script_path = os.path.abspath(sys.argv[0])
@@ -284,7 +287,7 @@ def main(args, shard_config):
 
     if args.local_rank != model.local_rank:
         raise RuntimeError("Local rank does not match model local rank")
-    args.local_world_size = shard_config["local_world_size"]
+    args.local_world_size = shard_config["rank_count"]
     args.global_rank = model.global_rank
     args.world_size = model.world_size
     train_batch_size = model.train_batch_size()
@@ -379,11 +382,11 @@ def main(args, shard_config):
         while True:
             start_time = time.time()
 
-            avg_train_loss, sum_tokens, sum_correct, lr, data_step = train_one_step(
+            avg_train_loss, sum_tokens, sum_correct, data_step = train_one_step(
                             args, optimizer, model, dataloader, total_steps)
 
             if avg_train_loss is None:
-                log_all(f"Epoch {epoch} data exhausted on global_rank={args.global_rank} at step={step}")
+                log_all(f"Epoch {epoch} data exhausted on global_rank={args.global_rank} at step={data_step}")
                 break
 
             end_time = time.time()
@@ -410,7 +413,7 @@ def main(args, shard_config):
                     'start_step': start_step,
                     'tokens': tokens,
                     'wallclock_time': wallclock_time,
-                    'lr': lr,
+                    'lr': scheduler.get_last_lr()[0],
                 }
 
                 if args.wandb and is_main_process():
@@ -441,7 +444,7 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default="~/lllm_output", help="Path to model checkpoints for resuming") 
     parser.add_argument("--resume", action="store_true", help="Resume training from previous checkpoint")
     parser.add_argument("--seed", type=int, default=0, help="Seed for random numbers.  Set to -1 to pick a fully random seed")
-    parser.add_argument("--compile", type=bool, default=True, help="Enable torch.compile")
+    parser.add_argument("--compile", type=bool, default=False, help="Enable torch.compile")
 
     # Dataset
     parser.add_argument("--dataset-dir", type=str, default="~/dataset_shard", help="Dataset directory")
@@ -456,10 +459,10 @@ if __name__ == "__main__":
 
     # Hyperparameters
     parser.add_argument("--context", type=int, default=2050, help="Context size for each microbatch")
-    parser.add_argument("--microbatch", type=int, default=6, help="Microbatch size")
+    parser.add_argument("--microbatch", type=int, default=10, help="Microbatch size")
     parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
-    parser.add_argument("--optimizer", type=str, default="adamw", help="Options: adamw")
-    parser.add_argument("--lr", type=float, default=1e-2, help="Learning rate for training")
+    parser.add_argument("--optimizer", type=str, default="adamw", help="Options: adamw, schedulefree")
+    parser.add_argument("--lr", type=float, default=4e-3, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
     parser.add_argument("--steps", type=int, default=160000, help="Total steps for training")

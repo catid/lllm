@@ -41,5 +41,5 @@ setup(
     include_package_data=True,
     package_dir={'': 'python_src'},
     packages=find_namespace_packages(where='python_src'),
-    install_requires=["numpy"]
+    install_requires=["numpy<2.0"]
 )
