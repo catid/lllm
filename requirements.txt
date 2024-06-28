@@ -13,7 +13,7 @@ pyarrow
 
 # Microsoft products
 mpi4py
-deepspeed
+deepspeed[1bit_adam]
 
 # Community products
 bitsandbytes

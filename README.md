@@ -27,6 +27,7 @@ pip install mamba_ssm
 pip install causal-conv1d
 pip install flash-attn
 pip install -r requirements.txt
+pip install cupy
 ```
 
 Follow the instructions in the `train/` directory.

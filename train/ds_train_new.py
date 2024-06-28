@@ -172,6 +172,7 @@ def train_one_step(args, optimizer, model_engine, dataloader, step):
 
         model_engine.backward(loss)
 
+        #log_all(f"is_gradient_accumulation_boundary = {model_engine.is_gradient_accumulation_boundary()}")
         model_engine.step()
 
     # Sync statistics between ranks
@@ -232,6 +233,9 @@ class CustomLR(object):
     def load_state_dict(self, sd):
         self.last_batch_iteration = sd['last_batch_iteration']
 
+    def _set_optimizer(self, optimizer):
+        self.optimizer = optimizer
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -249,11 +253,32 @@ def main(args, shard_config):
     if is_main_process():
         log_0(f"Total model parameters: {params/1000000.0:.2f}M")
 
+    # Modify deepspeed configuration programmatically
+    with open(args.deepspeed_config) as f:
+        ds_config = json.load(f)
+
     if args.optimizer == "schedulefree":
         optimizer = schedulefree.AdamWScheduleFree(
             model.parameters(),
             lr=args.lr,
             weight_decay=args.weight_decay)
+    elif args.optimizer == "1bitlamb":
+        optimizer = None
+        ds_config["optimizer"] = {
+            "type": "OneBitLamb",
+            "params": {
+                "lr": args.lr,
+                "max_coeff": 0.3,
+                "min_coeff": 0.01,
+                "freeze_step": 1000,
+                "cuda_aware": True,
+                "comm_backend_name": "nccl",
+                "coeff_beta": 0.9,
+                "factor_max": 4.0,
+                "factor_min": 0.5,
+                "factor_threshold": 0.1
+            }
+        }
     elif args.optimizer == "adamw":
         optimizer = torch.optim.AdamW(
             model.parameters(),
@@ -267,10 +292,6 @@ def main(args, shard_config):
     else:
         scheduler = CustomLR(optimizer, args)
 
-    # Modify deepspeed configuration programmatically
-    with open(args.deepspeed_config) as f:
-        ds_config = json.load(f)
-
     ds_config["train_micro_batch_size_per_gpu"] = args.microbatch
     ds_config["gradient_accumulation_steps"] = args.grad_accum
 
@@ -280,6 +301,9 @@ def main(args, shard_config):
         and version.parse(torch.version.cuda) >= version.parse("11.0")
         and torch.cuda.nccl.version() >= (2, 10)
     )
+    if args.optimizer == "1bitlamb":
+        # 1bitlamb does not support bf16 (seems to be a bug?)
+        bf16_ready = False
     ds_config["fp16"]["enabled"] = not bf16_ready
     ds_config["bf16"]["enabled"] = bf16_ready
 
@@ -287,13 +311,17 @@ def main(args, shard_config):
     args.deepspeed_config = None
 
     # DeepSpeed engine
-    model, optimizer, _, _ = deepspeed.initialize(
+    model, optimizer, _, scheduler = deepspeed.initialize(
         args=args,
         model=model,
         optimizer=optimizer,
         lr_scheduler=scheduler,
         config=ds_config,
         model_parameters=model.parameters())
+
+    # We have to set the optimizer here for 1bitlamb since it was None above
+    if args.optimizer=="1bitlamb":
+        scheduler._set_optimizer(optimizer)
 
     log_0(f"Arguments: {args} bf16_ready={bf16_ready}")
 
@@ -479,7 +507,7 @@ if __name__ == "__main__":
     parser.add_argument("--context", type=int, default=2050, help="Context size for each microbatch")
     parser.add_argument("--microbatch", type=int, default=10, help="Microbatch size")
     parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
-    parser.add_argument("--optimizer", type=str, default="adamw", help="Options: adamw, schedulefree")
+    parser.add_argument("--optimizer", type=str, default="adamw", help="Options: adamw, schedulefree, 1bitlamb")
     parser.add_argument("--lr", type=float, default=4e-3, help="Learning rate for training")
     parser.add_argument("--weight-decay", type=float, default=0.3, help="Weight decay for training")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate for training")
