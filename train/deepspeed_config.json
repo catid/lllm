@@ -24,6 +24,14 @@
     "bf16": {
         "enabled": true
     },
+    "fp16": {
+      "enabled": false,
+      "loss_scale": 0,
+      "loss_scale_window": 1000,
+      "initial_scale_power": 16,
+      "hysteresis": 2,
+      "min_loss_scale": 1
+    },
     "zero_optimization": {
       "stage": 0,
       "allgather_partitions": true,

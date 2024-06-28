@@ -172,7 +172,7 @@ def train_one_step(args, optimizer, model_engine, dataloader, step):
 
         model_engine.backward(loss)
 
-    model_engine.step()
+        model_engine.step()
 
     # Sync statistics between ranks
     comm.all_reduce(tensor=sum_loss, op=comm.ReduceOp.AVG)
@@ -271,6 +271,18 @@ def main(args, shard_config):
     with open(args.deepspeed_config) as f:
         ds_config = json.load(f)
 
+    ds_config["train_micro_batch_size_per_gpu"] = args.microbatch
+    ds_config["gradient_accumulation_steps"] = args.grad_accum
+
+    bf16_ready = (
+        torch.version.cuda
+        and torch.cuda.is_bf16_supported()
+        and version.parse(torch.version.cuda) >= version.parse("11.0")
+        and torch.cuda.nccl.version() >= (2, 10)
+    )
+    ds_config["fp16"]["enabled"] = not bf16_ready
+    ds_config["bf16"]["enabled"] = bf16_ready
+
     # Remove deepspeed_config from the args (we pass a dict into deepspeed.initialize)
     args.deepspeed_config = None
 
@@ -283,16 +295,18 @@ def main(args, shard_config):
         config=ds_config,
         model_parameters=model.parameters())
 
-    log_0(f"Arguments: {args}")
+    log_0(f"Arguments: {args} bf16_ready={bf16_ready}")
 
     if args.local_rank != model.local_rank:
         raise RuntimeError("Local rank does not match model local rank")
     args.local_world_size = shard_config["rank_count"]
     args.global_rank = model.global_rank
     args.world_size = model.world_size
-    train_batch_size = model.train_batch_size()
-    data_loader_batch_size = model.train_micro_batch_size_per_gpu()
-    steps_per_print = model.steps_per_print()
+    if model.train_micro_batch_size_per_gpu() != args.microbatch:
+        raise RuntimeError(f"model.train_micro_batch_size_per_gpu()=={model.train_micro_batch_size_per_gpu()} does not match args.microbatch=={args.microbatch}")
+    if model.train_batch_size() != args.microbatch * args.grad_accum * args.local_world_size:
+        raise RuntimeError(f"model.train_batch_size()=={model.train_batch_size()} does not match args.microbatch * args.grad_accum=={args.microbatch * args.grad_accum * args.local_world_size}")
+    #steps_per_print = model.steps_per_print()
 
     log_all(f"Node local_rank={args.local_rank} global_rank={args.global_rank} local_world_size={args.local_world_size} world_size={args.world_size}")
 
@@ -383,7 +397,11 @@ def main(args, shard_config):
             start_time = time.time()
 
             avg_train_loss, sum_tokens, sum_correct, data_step = train_one_step(
-                            args, optimizer, model, dataloader, total_steps)
+                args,
+                optimizer,
+                model,
+                dataloader,
+                total_steps)
 
             if avg_train_loss is None:
                 log_all(f"Epoch {epoch} data exhausted on global_rank={args.global_rank} at step={data_step}")
