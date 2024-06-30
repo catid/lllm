@@ -1,0 +1,6 @@
+[submodule "distributed/package/quiche"]
+	path = distributed/package/quiche
+	url = https://github.com/cloudflare/quiche.git
+[submodule "distributed/package/cuSZp"]
+	path = distributed/package/cuSZp
+	url = https://github.com/szcompressor/cuSZp.git

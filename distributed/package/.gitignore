@@ -1,0 +1,4 @@
+build
+dist
+cpp_async.egg-info
+test_pkg

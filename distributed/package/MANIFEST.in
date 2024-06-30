@@ -1,0 +1,6 @@
+include CMakeLists.txt
+recursive-include include *
+recursive-include src *
+recursive-include tests *
+recursive-include quiche *
+recursive-include cuSZp *
