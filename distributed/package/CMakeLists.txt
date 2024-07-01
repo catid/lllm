@@ -12,20 +12,55 @@ message(STATUS "CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
 if(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4")
 else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fPIC")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
     # -fsanitize=address
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0 -march=native")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
 endif()
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler -fPIC")
+
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-#find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)
+
+# Find CUDA without using the deprecated FindCUDA module
+include(CheckLanguage)
+check_language(CUDA)
+if(CMAKE_CUDA_COMPILER)
+    enable_language(CUDA)
+else()
+    message(FATAL_ERROR "No CUDA support found")
+endif()
+
+# Find PyTorch installation
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} -c "import torch; print(f'{torch.utils.cmake_prefix_path}/Torch')"
+    OUTPUT_VARIABLE Torch_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if(NOT Torch_DIR)
+    message(FATAL_ERROR "PyTorch installation not found. Make sure it's installed in the current Python environment.")
+endif()
+
+message(STATUS "Found PyTorch installation: ${Torch_DIR}")
+find_package(Torch REQUIRED)
 
 add_subdirectory(cuSZp)
+add_subdirectory(pybind11)
+
+if(TARGET pybind11::module)
+    message(STATUS "pybind11::module target found")
+else()
+    message(FATAL_ERROR "pybind11::module target NOT found")
+endif()
 
 set(QUICHE_LIB_PATH "${CMAKE_SOURCE_DIR}/quiche/target/release/libquiche.a")
 if(NOT EXISTS ${QUICHE_LIB_PATH})
@@ -46,14 +81,16 @@ add_library(${PROJECT_NAME} SHARED
 )
 target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    #${Python3_INCLUDE_DIRS}
-    #${Python3_NumPy_INCLUDE_DIRS}
+    ${Python3_INCLUDE_DIRS}
+    ${Python3_NumPy_INCLUDE_DIRS}
 )
 target_link_libraries(${PROJECT_NAME} PUBLIC
-    #${Python3_LIBRARIES}
+    ${Python3_LIBRARIES}
+    ${TORCH_LIBRARIES}
     cuSZp
     quiche
     Threads::Threads
+    pybind11::module
 )
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "") # remove lib prefix
 set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")
