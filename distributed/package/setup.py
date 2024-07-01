@@ -21,8 +21,10 @@ class BuildPackage(build_ext):
         except:
             raise RuntimeError("Rust must be installed to build quiche")
 
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+
         # Build quiche
-        quiche_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quiche')
+        quiche_dir = os.path.join(script_dir, 'quiche')
         print(f"Building quiche in {quiche_dir}")
         subprocess.check_call(['cargo', 'build', '--release', '--features', 'ffi'], cwd=quiche_dir)
 
@@ -41,8 +43,8 @@ class BuildPackage(build_ext):
             build_args.append(f"-j{num_threads}")
 
         os.makedirs(self.build_temp, exist_ok=True)
-        subprocess.check_call(["cmake", "-S", ".", "-B", self.build_temp] + cmake_args)
-        subprocess.check_call(["cmake", "--build", self.build_temp] + build_args)
+        subprocess.check_call(["cmake", "-S", ".", "-B", self.build_temp] + cmake_args, cwd=script_dir)
+        subprocess.check_call(["cmake", "--build", self.build_temp] + build_args, cwd=script_dir)
 
 setup(
     name="cpp_distributed",
@@ -51,7 +53,7 @@ setup(
     ext_modules=[CMakeExtension("cpp_distributed")],
     cmdclass={"build_ext": BuildPackage},
     package_data={
-        'cpp_distributed': ['cpp_distributed_library.so', 'libquiche.a'],
+        'cpp_distributed': ['cpp_distributed_library.so', 'libquiche.a', 'libcuSZp.a'],
     },
     include_package_data=True,
     package_dir={'': 'python_src'},

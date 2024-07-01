@@ -23,6 +23,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+#find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)
+
+add_subdirectory(cuSZp)
+
+set(QUICHE_LIB_PATH "${CMAKE_SOURCE_DIR}/quiche/target/release/libquiche.a")
+if(NOT EXISTS ${QUICHE_LIB_PATH})
+    message(FATAL_ERROR "Quiche library not found at ${QUICHE_LIB_PATH}. Please build it first.")
+endif()
+add_library(quiche STATIC IMPORTED)
+set_target_properties(quiche PROPERTIES IMPORTED_LOCATION ${QUICHE_LIB_PATH})
 
 file(GLOB_RECURSE DISTRIBUTED_HEADER_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp")
@@ -41,6 +51,8 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 target_link_libraries(${PROJECT_NAME} PUBLIC
     #${Python3_LIBRARIES}
+    cuSZp
+    quiche
     Threads::Threads
 )
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "") # remove lib prefix
