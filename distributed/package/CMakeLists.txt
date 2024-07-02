@@ -54,13 +54,6 @@ message(STATUS "Found PyTorch installation: ${Torch_DIR}")
 find_package(Torch REQUIRED)
 
 add_subdirectory(cuSZp)
-add_subdirectory(pybind11)
-
-if(TARGET pybind11::module)
-    message(STATUS "pybind11::module target found")
-else()
-    message(FATAL_ERROR "pybind11::module target NOT found")
-endif()
 
 set(QUICHE_LIB_PATH "${CMAKE_SOURCE_DIR}/quiche/target/release/libquiche.a")
 if(NOT EXISTS ${QUICHE_LIB_PATH})
@@ -90,7 +83,6 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
     cuSZp
     quiche
     Threads::Threads
-    pybind11::module
 )
 set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "") # remove lib prefix
 set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}")

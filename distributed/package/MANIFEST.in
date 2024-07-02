@@ -4,4 +4,3 @@ recursive-include src *
 recursive-include tests *
 recursive-include quiche *
 recursive-include cuSZp *
-recursive-include pybind11 *
