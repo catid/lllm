@@ -4,6 +4,3 @@
 [submodule "distributed/package/cuSZp"]
 	path = distributed/package/cuSZp
 	url = https://github.com/szcompressor/cuSZp.git
-[submodule "distributed/package/pybind11"]
-	path = distributed/package/pybind11
-	url = https://github.com/pybind/pybind11.git
