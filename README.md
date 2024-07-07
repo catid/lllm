@@ -38,6 +38,12 @@ Follow the instructions in the `train/` directory.
 Training TODO:
 * Implement Async DiLoCo: https://arxiv.org/pdf/2401.09135v1
 * Activation compression: https://github.com/zirui-ray-liu/Exact
+* Modified loss function: https://openreview.net/pdf?id=vHOO1lxggJ
+
+Model TODO:
+* Add ALiBi/RoPE positional encoding
+* SparseK KV cache compression for SWA: https://arxiv.org/abs/2406.16747
+Modify FA2 to provide vertical token scores.  Top-M, M = K*2 and then a learned projection Top-K to pick the tokens to keep from each window.
 
 Dataloader TODO:
 * Add support for returning the list of concatenated samples in flash_attn format
