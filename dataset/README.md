@@ -10,11 +10,11 @@ The ansible scripts from `playbook/` have already installed the package.  If you
 
 ## Shard and tokenize the dataset
 
-This step will access your file server to create local shards of the dataset on each training node.  Each node will have a fraction of the dataset.
+This step will create local shards of the dataset on each training node.  Each node will have a fraction of the dataset.
 
 Modify the `hosts.txt` file to point to the hosts you are using for training.
 
-Update the `--dataset-dir` parameter to the location of the dataset on your file server.  The `-output-dir` will be the same on each node.
+Update the `--dataset-dir` parameter to the location of the Fineweb-Edu dataset on your file server.  The `--output-dir` will be the same on each node.
 
 ```bash
 cd dataset
