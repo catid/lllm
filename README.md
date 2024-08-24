@@ -4,6 +4,7 @@
 
 A work in progress.
 
+
 ## (1) Node Setup
 
 For a development setup with fast iterative deployment on LAN, follow the instruction from the `playbooks/` directory.
@@ -13,7 +14,7 @@ For Internet scale training, we will need to build a Docker container...
 
 ## (2) Dataset Setup
 
-Follow the instructions in the `dataset/` directory.
+This is using my dataloader pip package from https://github.com/catid/dataloader
 
 
 ## (3) Training
@@ -39,11 +40,16 @@ Training TODO:
 * Implement Async DiLoCo: https://arxiv.org/pdf/2401.09135v1
 * Activation compression: https://github.com/zirui-ray-liu/Exact
 * Modified loss function: https://openreview.net/pdf?id=vHOO1lxggJ
+* Patch-based training: https://arxiv.org/pdf/2407.12665
 
 Model TODO:
+* Use u-muP parameterization: https://arxiv.org/pdf/2407.17465
 * Add ALiBi/RoPE positional encoding
-* SparseK KV cache compression for SWA: https://arxiv.org/abs/2406.16747
+* Replace SWA with KV cache compression as in https://github.com/VITA-Group/LoCoCo/
 Modify FA2 to provide vertical token scores.  Top-M, M = K*2 and then a learned projection Top-K to pick the tokens to keep from each window.
+* N-gram accelerated LM architecture based on results like https://arxiv.org/pdf/2407.12034
+* DRUGS on the second half of the model: https://github.com/EGjoni/DRUGS
+* Some layers attend to top-k input tokens from middle of model
 
 Dataloader TODO:
 * Add support for returning the list of concatenated samples in flash_attn format
@@ -56,6 +62,7 @@ Training future experiments:
 * Meta-learning to try to estimate weight updates using larger batch sizes and more iterations from smaller batch sizes and single steps
 * Try optimi https://optimi.benjaminwarner.dev/
 * DataStates-LLM DeepSpeed checkpointing: https://github.com/datastates/datastates-llm
+* Distributed training using LoRA-Pro: https://arxiv.org/abs/2407.18242
 
 FFN experiments:
 * Sharing FFN weights onion-style https://arxiv.org/abs/2104.06022
